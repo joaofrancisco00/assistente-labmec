@@ -39,9 +39,14 @@ TEMPERATURE            = 0.1
 MAX_RETRIES            = 2          # tentativas extras ao detectar alucinação
 K_HEADERS              = 4          # chunks de declaração de classe a recuperar
 K_EXAMPLES             = 4          # chunks de exemplo de uso a recuperar
+EXAMPLE_POOL_MULT      = 6          # tamanho do pool buscado antes do boost por classe citada
 
 COL_HEADERS  = "neopz_headers"
 COL_EXAMPLES = "neopz_examples"
+
+# Headers "chute" que o modelo inventa e que NÃO existem no projeto — removidos
+# automaticamente na correção pós-geração (ver _corrigir_includes_automaticamente).
+INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -108,17 +113,48 @@ def _carregar_bancos(embeddings):
 
 # ── Recuperação ────────────────────────────────────────────────────────────────
 
+def _boost_por_classe(docs: list, classes_citadas: set, metadata_key: str) -> list:
+    """
+    Reordena `docs` para colocar primeiro os chunks cuja metadata (`classe` para
+    headers, `classes_usadas` para exemplos) bate exatamente com alguma classe
+    TPZ citada na pergunta do usuário. Pura reordenação determinística — não
+    depende de embedding/MMR, é um complemento para os casos em que a busca
+    semântica pura não traz o exemplo/declaração certa para uma classe citada
+    explicitamente.
+    """
+    if not classes_citadas:
+        return docs
+    boost, resto = [], []
+    for doc in docs:
+        valor = doc.metadata.get(metadata_key, "") or ""
+        partes = {c.strip() for c in valor.split(",") if c.strip()}
+        if partes & classes_citadas:
+            boost.append(doc)
+        else:
+            resto.append(doc)
+    return boost + resto
+
+
 def _recuperar_contexto(pergunta: str, headers_db, examples_db) -> tuple:
     """
-    Busca nas duas coleções com MMR e retorna (h_docs, e_docs, fontes).
+    Busca nas duas coleções com MMR (pool ampliado) e depois reordena (boost)
+    priorizando chunks cuja classe bate com alguma classe TPZ citada na
+    pergunta. Retorna (h_docs, e_docs, fontes).
     MMR = Maximal Marginal Relevance — evita trazer chunks repetidos.
     """
-    h_docs = headers_db.max_marginal_relevance_search(
-        pergunta, k=K_HEADERS, fetch_k=K_HEADERS * 3
+    classes_citadas = find_tpz_classes_in_code(pergunta)
+
+    pool_headers = max(K_HEADERS * EXAMPLE_POOL_MULT, K_HEADERS)
+    h_pool = headers_db.max_marginal_relevance_search(
+        pergunta, k=pool_headers, fetch_k=pool_headers * 2
     )
-    e_docs = examples_db.max_marginal_relevance_search(
-        pergunta, k=K_EXAMPLES, fetch_k=K_EXAMPLES * 3
+    h_docs = _boost_por_classe(h_pool, classes_citadas, "classe")[:K_HEADERS]
+
+    pool_examples = max(K_EXAMPLES * EXAMPLE_POOL_MULT, K_EXAMPLES)
+    e_pool = examples_db.max_marginal_relevance_search(
+        pergunta, k=pool_examples, fetch_k=pool_examples * 2
     )
+    e_docs = _boost_por_classe(e_pool, classes_citadas, "classes_usadas")[:K_EXAMPLES]
 
     all_docs = h_docs + e_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}
@@ -324,6 +360,77 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
     return faltando
 
 
+def _corrigir_includes_automaticamente(
+    codigo: str,
+    class_header_index: dict,
+    collisions: dict,
+    headers_whitelist: set,
+) -> tuple:
+    """
+    Correção determinística pós-geração — não depende do LLM obedecer a
+    instrução de correção no prompt (na prática, ele não obedece de forma
+    confiável neste modelo local: chegou a repetir o mesmo header errado em
+    3 tentativas seguidas).
+
+    1. Remove includes "lixo" conhecidos (ex: "NeoPZ.h") e includes "chutados"
+       (<NomeDaClasse>.h) que não existem na whitelist real de headers.
+    2. Para cada classe TPZ usada no código que está no índice determinístico
+       (e não é ambígua/collision), garante que o #include correto está
+       presente — injetando-o se estiver faltando.
+
+    Retorna (codigo_corrigido, lista_de_correcoes_aplicadas).
+    """
+    if not class_header_index:
+        return codigo, []
+
+    usadas = find_tpz_classes_in_code(codigo)
+    necessarios = {
+        classe: Path(class_header_index[classe]).name
+        for classe in usadas
+        if classe not in collisions and class_header_index.get(classe)
+    }
+
+    linhas = codigo.split("\n")
+
+    def _includes_atuais(linhas: list) -> dict:
+        atuais = {}
+        for i, linha in enumerate(linhas):
+            m = re.search(r'#include\s*[<"]([^>"]+\.h)[>"]', linha)
+            if m:
+                atuais.setdefault(Path(m.group(1)).name, i)
+        return atuais
+
+    atuais = _includes_atuais(linhas)
+    candidatos_chute = {f"{c.lower()}.h" for c in necessarios}
+    linhas_remover = {
+        idx for nome, idx in atuais.items()
+        if nome.lower() in INCLUDES_LIXO_CONHECIDOS
+        or (nome.lower() in candidatos_chute and nome not in headers_whitelist)
+    }
+    if linhas_remover:
+        linhas = [l for i, l in enumerate(linhas) if i not in linhas_remover]
+
+    if not necessarios:
+        return "\n".join(linhas), []
+
+    atuais = _includes_atuais(linhas)
+    faltando = {c: h for c, h in necessarios.items() if h not in atuais}
+    if not faltando:
+        return "\n".join(linhas), []
+
+    posicoes_include = [i for i, l in enumerate(linhas) if re.match(r'\s*#include\b', l)]
+    ultimo_include_idx = max(posicoes_include, default=-1)
+
+    novas = [f'#include "{h}"' for h in sorted(set(faltando.values()))]
+    if ultimo_include_idx >= 0:
+        linhas = linhas[:ultimo_include_idx + 1] + novas + linhas[ultimo_include_idx + 1:]
+    else:
+        linhas = novas + linhas
+
+    correcoes = [f'{c}: + #include "{h}"' for c, h in faltando.items()]
+    return "\n".join(linhas), correcoes
+
+
 # ── Pipeline principal ─────────────────────────────────────────────────────────
 
 def gerar_codigo(
@@ -347,6 +454,7 @@ def gerar_codigo(
     classes_alucinadas = None
     includes_errados = None
     includes_por_classe = None
+    correcoes_automaticas = []
 
     for tentativa in range(1, MAX_RETRIES + 2):
         print(f"  [Tentativa {tentativa}] Buscando contexto e gerando resposta...")
@@ -366,6 +474,15 @@ def gerar_codigo(
         # 4. Chama o modelo
         resposta = llm.invoke(prompt)
 
+        # 4.5 Correção determinística pós-geração — não depende do LLM obedecer
+        #     a instrução de correção no prompt (na prática ele não obedece de
+        #     forma confiável: repete o mesmo header errado em retries).
+        resposta, correcoes_automaticas = _corrigir_includes_automaticamente(
+            resposta, class_header_index, collisions, headers_whitelist,
+        )
+        if correcoes_automaticas:
+            print(f"  🔧 Headers corrigidos automaticamente: {', '.join(correcoes_automaticas)}")
+
         # 5. Valida classes E includes (whitelist + índice determinístico por classe)
         classes_alucinadas = _validar_codigo(resposta, whitelist)
         includes_errados = _validar_includes(resposta, headers_whitelist)
@@ -374,13 +491,14 @@ def gerar_codigo(
         if not classes_alucinadas and not includes_errados and not includes_por_classe:
             print("  ✅ Validação OK — classes e headers existem e estão corretos no NeoPZ!")
             return {
-                "resposta":            resposta,
-                "valido":              True,
-                "alucinacoes":         [],
-                "includes":            {},
-                "includes_por_classe": {},
-                "fontes":              fontes,
-                "tentativas":          tentativa,
+                "resposta":             resposta,
+                "valido":               True,
+                "alucinacoes":          [],
+                "includes":             {},
+                "includes_por_classe":  {},
+                "correcoes_automaticas": correcoes_automaticas,
+                "fontes":               fontes,
+                "tentativas":           tentativa,
             }
 
         if classes_alucinadas:
@@ -397,13 +515,14 @@ def gerar_codigo(
         print("  ↩️  Corrigindo automaticamente na próxima tentativa...")
 
     return {
-        "resposta":            resposta,
-        "valido":              False,
-        "alucinacoes":         classes_alucinadas or [],
-        "includes":            includes_errados or {},
-        "includes_por_classe": includes_por_classe or {},
-        "fontes":              fontes,
-        "tentativas":          tentativa,
+        "resposta":             resposta,
+        "valido":               False,
+        "alucinacoes":          classes_alucinadas or [],
+        "includes":             includes_errados or {},
+        "includes_por_classe":  includes_por_classe or {},
+        "correcoes_automaticas": correcoes_automaticas,
+        "fontes":               fontes,
+        "tentativas":           tentativa,
     }
 
 
@@ -453,6 +572,8 @@ def main():
         print()
 
         # Status de validação
+        if resultado["correcoes_automaticas"]:
+            print(f"🔧 Headers corrigidos automaticamente: {', '.join(resultado['correcoes_automaticas'])}")
         if resultado["alucinacoes"]:
             print(f"⚠️  Classes não verificadas: {', '.join(resultado['alucinacoes'])}")
         if resultado["includes"]:
