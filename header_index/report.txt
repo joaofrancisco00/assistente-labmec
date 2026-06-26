@@ -1,0 +1,8 @@
+NeoPZ class -> header index
+========================================
+Repo root: /Users/labmec/projects/neopz
+Headers escaneados: 643
+Classes/structs com definicao encontrada: 659
+  -> sem ambiguidade (1 unico header): 649
+  -> com colisao (definidas em >1 header, revisar manualmente): 10
+Classes vistas so como forward-declaration (nunca um corpo): 17

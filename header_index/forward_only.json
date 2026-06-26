@@ -1,0 +1,58 @@
+{
+  "Fad": [
+    "Common/FAD/fadType.h",
+    "Common/FAD/utils/promote.h",
+    "Common/pzreal.h",
+    "Save/TPZBFileStream.h",
+    "Save/TPZFileStream.h",
+    "Save/TPZStream.h"
+  ],
+  "MD5state_st": [
+    "Save/pzmd5stream.h"
+  ],
+  "TCLASS": [
+    "Solvers/EigenSolvers/TPZSpectralTransform.h"
+  ],
+  "TCompGrid": [
+    "Pre/pzdatafi.h"
+  ],
+  "TFadBinaryAdd": [
+    "Common/FAD/TinyFadET/tfad.h"
+  ],
+  "TFadBinaryDiv": [
+    "Common/FAD/TinyFadET/tfad.h"
+  ],
+  "TFadBinaryMinus": [
+    "Common/FAD/TinyFadET/tfad.h"
+  ],
+  "TFadBinaryMul": [
+    "Common/FAD/TinyFadET/tfad.h"
+  ],
+  "TGeoGrid": [
+    "Pre/pzdatafi.h"
+  ],
+  "TPZAvlMap": [
+    "Analysis/pzmganalysis.h"
+  ],
+  "TPZConnectBC": [
+    "Util/pzvec.h"
+  ],
+  "TPZGaussLegendreRule": [
+    "Integral/tpzintrulelist.h"
+  ],
+  "TPZGaussLobattoRule": [
+    "Integral/tpzintrulelist.h"
+  ],
+  "TPZGeoNodeBC": [
+    "Util/pzvec.h"
+  ],
+  "TPZOneDRef": [
+    "Analysis/pzmganalysis.h"
+  ],
+  "args_container": [
+    "PerfUtil/arglib.h"
+  ],
+  "rusage": [
+    "Common/FAD/utils/timer.h"
+  ]
+}

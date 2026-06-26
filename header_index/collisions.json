@@ -1,0 +1,66 @@
+{
+  "SPr": [
+    "Geom/pzshapeextend.h",
+    "Shape/pzshapeextend.h"
+  ],
+  "TComputeSequence": [
+    "Material/Plasticity/TPZMohrCoulombNeto.h",
+    "Material/Plasticity/TPZMohrCoulombPV.h",
+    "Material/Plasticity/TPZYCMohrCoulombPV.h"
+  ],
+  "TMem": [
+    "Geom/pzgeopoint.h",
+    "Geom/pzshapeextend.h",
+    "Shape/pzshapeextend.h",
+    "Shape/pzshapepoint.h"
+  ],
+  "TPZBlackOil2P3D": [
+    "Material/BlackOil/TPZBlackOil2P3D.h",
+    "Material/needrefactor/REAL/pzblackoil2p3d.h"
+  ],
+  "TPZCurve": [
+    "UnitTest_PZ/TestGeometry/TPZCurve.h",
+    "UnitTest_PZ/TestIntegNum/TPZCurve.h"
+  ],
+  "TPZLine": [
+    "Topology/tpzline.h",
+    "Util/pzline.h"
+  ],
+  "TPZMixedDarcyFlow": [
+    "Material/DarcyFlow/TPZMixedDarcyFlow.h",
+    "Material/needrefactor/REAL/TPZMixedDarcyFlow.h"
+  ],
+  "TPlasticState": [
+    "Material/Plasticity/TPZMohrCoulombNeto.h",
+    "Material/Plasticity/TPZMohrCoulombPV.h"
+  ],
+  "ThreadData": [
+    "Analysis/TPZAnalysis.h",
+    "StrMatrix/pzstrmatrixor.h",
+    "StrMatrix/pzstrmatrixot.h",
+    "SubStruct/tpzpairstructmatrix.h"
+  ],
+  "TinyFad": [
+    "Common/FAD/TinyFad/Specializations/tinyfadeight.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeighteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeleven.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfifteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfive.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfour.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfourteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadnine.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadnineteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadone.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadseven.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadseventeen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadsix.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadsixteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadten.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadthirteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadthree.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwelve.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwenty.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwo.h",
+    "Common/FAD/TinyFad/tinyfad.h"
+  ]
+}

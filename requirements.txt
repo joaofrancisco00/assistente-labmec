@@ -1,0 +1,12 @@
+# Instale com: pip install -r requirements.txt
+
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-text-splitters>=0.2.0
+langchain-huggingface>=0.0.3   # embeddings atualizados
+langchain-ollama>=0.1.0        # OllamaLLM atualizado
+langchain-chroma>=0.1.0        # Chroma atualizado
+chromadb>=0.5.0
+sentence-transformers>=2.7.0
+tqdm>=4.66.0

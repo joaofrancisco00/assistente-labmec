@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Build C++ / CMake
+build/
+
+# Banco vetorial Chroma (regenerável pelo indexer)
+banco_chroma/
+
+# NeoPZ (repositório separado)
+base_de_dados/neopz/
+
+# Sistema / editor
+.DS_Store
+.vscode/
