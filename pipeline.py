@@ -296,6 +296,25 @@ Resposta:"""
 
 # ── Validação ──────────────────────────────────────────────────────────────────
 
+def _resposta_contem_codigo(resposta: str) -> bool:
+    """
+    Heurística para distinguir uma resposta com código real de uma resposta
+    em prosa (ex: "o que é a classe X e para que ela serve"). Usada para não
+    exigir/injetar #include em respostas puramente explicativas, onde a
+    classe é só citada no texto, não usada de fato.
+    """
+    if "```" in resposta:
+        return True
+    if re.search(r'#include\s*[<"]', resposta):
+        return True
+    if re.search(r'\bnew\s+TPZ\w+', resposta):
+        return True
+    # Padrões de uso real: declaração/instanciação/chamada (TPZX *v = ..., TPZX v(...), TPZX::Metodo)
+    if re.search(r'\bTPZ\w+\s*[\*&]?\s*\w+\s*[=;(]', resposta):
+        return True
+    return False
+
+
 def _validar_codigo(codigo: str, whitelist: set) -> list:
     """
     Verifica se o código usa apenas classes reais do NeoPZ.
@@ -477,16 +496,27 @@ def gerar_codigo(
         # 4.5 Correção determinística pós-geração — não depende do LLM obedecer
         #     a instrução de correção no prompt (na prática ele não obedece de
         #     forma confiável: repete o mesmo header errado em retries).
-        resposta, correcoes_automaticas = _corrigir_includes_automaticamente(
-            resposta, class_header_index, collisions, headers_whitelist,
-        )
-        if correcoes_automaticas:
-            print(f"  🔧 Headers corrigidos automaticamente: {', '.join(correcoes_automaticas)}")
+        #     Só se aplica quando a resposta de fato contém código — em
+        #     respostas de prosa (ex: "o que é a classe X") a classe é só
+        #     citada no texto, não usada, então não faz sentido exigir/injetar
+        #     #include.
+        tem_codigo = _resposta_contem_codigo(resposta)
+        correcoes_automaticas = []
+        if tem_codigo:
+            resposta, correcoes_automaticas = _corrigir_includes_automaticamente(
+                resposta, class_header_index, collisions, headers_whitelist,
+            )
+            if correcoes_automaticas:
+                print(f"  🔧 Headers corrigidos automaticamente: {', '.join(correcoes_automaticas)}")
 
-        # 5. Valida classes E includes (whitelist + índice determinístico por classe)
+        # 5. Valida classes (sempre) E includes (só quando há código de fato)
         classes_alucinadas = _validar_codigo(resposta, whitelist)
-        includes_errados = _validar_includes(resposta, headers_whitelist)
-        includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
+        if tem_codigo:
+            includes_errados = _validar_includes(resposta, headers_whitelist)
+            includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
+        else:
+            includes_errados = {}
+            includes_por_classe = {}
 
         if not classes_alucinadas and not includes_errados and not includes_por_classe:
             print("  ✅ Validação OK — classes e headers existem e estão corretos no NeoPZ!")
