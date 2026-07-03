@@ -110,29 +110,105 @@ def _extract_method_names(content: str) -> list:
     return list(dict.fromkeys(names))  # mantém ordem, sem duplicatas
 
 
+# ── Declarações que NÃO são class/struct (mesmo bug, escopo maior) ──────────────
+#
+# O NeoPZ também expõe API pública via `namespace TPZxxx { ... }` (ex:
+# TPZGeoMeshTools::CreateGeoMeshOnGrid, a forma padrão de criar uma malha —
+# literalmente o primeiro passo de qualquer tutorial), além de `using X = ...`,
+# `typedef ... X;` e `enum (class) X`. Um regex que só reconhece class/struct
+# trata todos esses nomes reais como inexistentes.
+
+_NAMESPACE_DECL_RE = re.compile(r'\bnamespace\s+(TPZ\w+)\s*\{')
+_USING_ALIAS_TPZ_RE = re.compile(r'\busing\s+(TPZ\w+)\s*=')
+_TYPEDEF_TPZ_RE = re.compile(r'\btypedef\b[^;{}]*?\b(TPZ\w+)\s*;')
+_ENUM_TPZ_RE = re.compile(r'\benum(?:\s+class)?\s+(TPZ\w+)\b')
+
+
+def _find_extra_tpz_declarations(content: str) -> set:
+    """Nomes TPZxxx declarados via namespace/using/typedef/enum (não class/struct)."""
+    names = set()
+    names.update(_NAMESPACE_DECL_RE.findall(content))
+    names.update(_USING_ALIAS_TPZ_RE.findall(content))
+    names.update(_TYPEDEF_TPZ_RE.findall(content))
+    names.update(_ENUM_TPZ_RE.findall(content))
+    return names
+
+
+def _extract_simple_tpz_declarations(content: str, filepath: Path) -> list:
+    """
+    Gera ClassChunk leves para using/typedef/enum com prefixo TPZ — não têm
+    corpo de classe (using/typedef nunca têm; enum às vezes tem um bloco de
+    valores), então não passam pela lógica de seção pública/protegida/privada,
+    só pegam a própria linha/bloco da declaração como conteúdo.
+    """
+    chunks = []
+    seen = set()
+
+    for m in re.finditer(r'(?:^|\n)[ \t]*using\s+TPZ\w+\s*=[^;]+;', content, re.MULTILINE):
+        name_m = _USING_ALIAS_TPZ_RE.search(m.group(0))
+        if not name_m or name_m.group(1) in seen:
+            continue
+        seen.add(name_m.group(1))
+        chunks.append(ClassChunk(class_name=name_m.group(1), file_path=str(filepath),
+                                  content=m.group(0).strip(), methods=[]))
+
+    for m in re.finditer(r'(?:^|\n)[ \t]*typedef\b[^;{}]*;', content, re.MULTILINE):
+        name_m = _TYPEDEF_TPZ_RE.search(m.group(0))
+        if not name_m or name_m.group(1) in seen:
+            continue
+        seen.add(name_m.group(1))
+        chunks.append(ClassChunk(class_name=name_m.group(1), file_path=str(filepath),
+                                  content=m.group(0).strip(), methods=[]))
+
+    for m in re.finditer(r'\benum(?:\s+class)?\s+TPZ\w+\b', content):
+        name_m = _ENUM_TPZ_RE.search(m.group(0))
+        if not name_m or name_m.group(1) in seen:
+            continue
+        brace_pos = content.find('{', m.start())
+        semi_pos = content.find(';', m.start())
+        if brace_pos != -1 and (semi_pos == -1 or brace_pos < semi_pos):
+            end_pos = _find_matching_brace(content, brace_pos)
+            text = content[m.start():end_pos + 1].strip() + ";"
+        elif semi_pos != -1:
+            text = content[m.start():semi_pos + 1].strip()
+        else:
+            continue
+        seen.add(name_m.group(1))
+        chunks.append(ClassChunk(class_name=name_m.group(1), file_path=str(filepath),
+                                  content=text, methods=[]))
+
+    return chunks
+
+
 # ── API pública ────────────────────────────────────────────────────────────────
 
 def extract_classes_from_header(filepath: Path) -> list:
     """
-    Extrai todas as classes TPZxxx de um arquivo .h.
-    Retorna uma lista de ClassChunk — um por classe encontrada.
+    Extrai todas as declarações TPZxxx de um arquivo .h — classes, structs,
+    namespaces (ex: TPZGeoMeshTools), e também using/typedef/enum (via
+    _extract_simple_tpz_declarations). Retorna uma lista de ClassChunk — um
+    por declaração encontrada.
     """
     try:
         content = filepath.read_text(encoding='utf-8', errors='replace')
     except Exception:
         return []
 
-    # Encontra declarações de classe/struct com prefixo TPZ
+    # Encontra declarações de classe/struct/namespace com prefixo TPZ.
+    # namespace entra aqui (não em _extract_simple_tpz_declarations) porque,
+    # como class/struct, tem um corpo com chaves que vale a pena extrair
+    # (ex: as assinaturas de função dentro de `namespace TPZGeoMeshTools {}`).
     class_pattern = re.compile(
         r'(?:^|\n)[ \t]*(?:template\s*<[^>]*>\s*)?'
-        r'((?:class|struct)\s+(TPZ\w+)[^{;]*)',
+        r'((class|struct|namespace)\s+(TPZ\w+)[^{;]*)',
         re.MULTILINE
     )
 
     chunks = []
     for match in class_pattern.finditer(content):
-        class_name = match.group(2)
         header_line = match.group(1).strip()
+        kind = match.group(2)
+        class_name = match.group(3)
 
         # Encontra a chave de abertura
         brace_pos = content.find('{', match.start())
@@ -146,11 +222,16 @@ def extract_classes_from_header(filepath: Path) -> list:
         end_pos = _find_matching_brace(content, brace_pos)
         body = content[brace_pos + 1:end_pos]
 
-        clean = _extract_public_section(header_line, body)
-
-        # Limita tamanho do chunk
-        if len(clean) > 2500:
-            clean = clean[:2500] + "\n    // ... (truncado)"
+        if kind == "namespace":
+            # namespace não tem public:/private: — indexa o corpo direto
+            clean_body = body.strip()
+            if len(clean_body) > 2500:
+                clean_body = clean_body[:2500] + "\n    // ... (truncado)"
+            clean = f"{header_line} {{\n{clean_body}\n}}"
+        else:
+            clean = _extract_public_section(header_line, body)
+            if len(clean) > 2500:
+                clean = clean[:2500] + "\n    // ... (truncado)"
 
         methods = _extract_method_names(body)
 
@@ -161,13 +242,16 @@ def extract_classes_from_header(filepath: Path) -> list:
             methods=methods[:15]
         ))
 
+    chunks.extend(_extract_simple_tpz_declarations(content, filepath))
+
     return chunks
 
 
 def build_class_whitelist(base_path: Path) -> set:
     """
-    Varre todos os .h e retorna o conjunto de nomes de classes TPZ reais.
-    Usado pelo indexer para criar a whitelist de validação.
+    Varre todos os .h e retorna o conjunto de nomes TPZ reais — classes,
+    structs, namespaces (ex: TPZGeoMeshTools), aliases `using`/`typedef` e
+    enums. Usado pelo indexer para criar a whitelist de validação.
     """
     classes = set()
     for h_file in base_path.rglob("*.h"):
@@ -175,6 +259,7 @@ def build_class_whitelist(base_path: Path) -> set:
             content = h_file.read_text(encoding='utf-8', errors='replace')
             found = re.findall(r'\b(?:class|struct)\s+(TPZ\w+)', content)
             classes.update(found)
+            classes.update(_find_extra_tpz_declarations(content))
         except Exception:
             pass
     return classes

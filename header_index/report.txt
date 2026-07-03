@@ -1,8 +1,12 @@
 NeoPZ class -> header index
 ========================================
-Repo root: /Users/labmec/projects/neopz
+Repo root: base_de_dados/neopz (relativo a este projeto)
 Headers escaneados: 643
-Classes/structs com definicao encontrada: 659
-  -> sem ambiguidade (1 unico header): 649
-  -> com colisao (definidas em >1 header, revisar manualmente): 10
-Classes vistas so como forward-declaration (nunca um corpo): 17
+Classes/structs/namespaces/enums/aliases com definicao encontrada: 822
+  -> sem ambiguidade (1 unico header): 770
+  -> com colisao (definidas em >1 header, revisar manualmente): 52
+Vistas so como forward-declaration (nunca um corpo): 18
+
+Regenerado apos corrigir o parser para tambem reconhecer namespace/using/typedef/enum
+(antes so reconhecia class/struct -- TPZGeoMeshTools, TPZCompMeshTools,
+TPZPersistenceManagerNS e varios enums/aliases eram invisiveis ao indice).

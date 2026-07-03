@@ -54,5 +54,15 @@
   ],
   "rusage": [
     "Common/FAD/utils/timer.h"
+  ],
+  "std": [
+    "Mesh/TPZSBFemMultiphysicsElGroup.h",
+    "Mesh/TPZSBFemVolumeHdiv.h",
+    "Mesh/TPZSBFemVolumeL2.h",
+    "Mesh/TPZSBFemVolumeMultiphysics.h",
+    "Pre/TPZBuildSBFemMultiphysics.h",
+    "Publications/hdiv2dpaper201504.h",
+    "Publications/hdiv3dpaper201504.h",
+    "Publications/hdivCurvedJCompAppMath.h"
   ]
 }

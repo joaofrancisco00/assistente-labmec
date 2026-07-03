@@ -1,23 +1,23 @@
 # Indice classe -> header (NeoPZ)
 
-Guard-rail deterministico contra alucinacao de `#include` no assistente RAG. Gerado por `build_class_header_index.py` a partir do clone local em `/Users/labmec/projects/neopz`.
+Guard-rail deterministico contra alucinacao de `#include` no assistente RAG. Gerado por `build_class_header_index.py` a partir de `../base_de_dados/neopz` (o mesmo clone local usado pelo `indexer.py` para montar o corpus do RAG — antes este índice era gerado contra um clone separado em `/Users/labmec/projects/neopz`, que gerava o risco de os dois ficarem fora de sincronia entre si; agora os dois sempre apontam para a mesma fonte).
 
 ## Arquivos
 
-- `class_header_index.json` — 649 classes sem ambiguidade, `{"TPZCompMesh": "Mesh/pzcmesh.h", ...}`. Use como lookup table: antes do LLM emitir um `#include`, valide/substitua pelo caminho aqui.
-- `collisions.json` — 10 classes definidas em mais de um header (revisar manualmente; ver notas abaixo).
-- `forward_only.json` — 17 classes só vistas como forward-declaration (nunca um corpo), majoritariamente tipos externos/internos auxiliares.
+- `class_header_index.json` — 770 classes/namespaces/enums/aliases sem ambiguidade, `{"TPZCompMesh": "Mesh/pzcmesh.h", ...}`. Use como lookup table: antes do LLM emitir um `#include`, valide/substitua pelo caminho aqui.
+- `collisions.json` — 52 nomes definidos em mais de um header (revisar manualmente; ver notas abaixo).
+- `forward_only.json` — 18 nomes só vistos como forward-declaration (nunca um corpo), majoritariamente tipos externos/internos auxiliares.
 - `report.txt` — resumo da última execucao.
+
+**2026-07-03**: `build_class_header_index.py` foi corrigido para reconhecer não só `class`/`struct`, mas também `namespace`, `using X = ...`, `typedef ... X;` e `enum`/`enum class`. Antes disso, `TPZGeoMeshTools`, `TPZCompMeshTools`, `TPZPersistenceManagerNS` (todos `namespace`) e vários enums/aliases (`TPZDrawStyle`, `TPZResidualType`, `TPZTimeDiscr`, etc.) eram completamente invisíveis a este índice e à whitelist do pipeline — o que fazia o assistente marcar código correto usando essas APIs como "alucinação". `TPZGeoMeshTools::CreateGeoMeshOnGrid` em particular é a forma padrão de criar uma malha no NeoPZ, ou seja, isso afetava perguntas bem básicas. Ver `cpp_parser.py` para a mesma correção do lado da whitelist/indexação Chroma.
 
 ## Caveat importante: clone desatualizado
 
-O clone usado (`/Users/labmec/projects/neopz`) esta no commit `4c6b6d2` de **2022-03-18** — cerca de 4 anos atras da data de hoje. Antes de depender deste indice em produção:
+O clone usado (`../base_de_dados/neopz`) esta no commit `4c6b6d2` de **2022-03-18** — cerca de 4 anos atras da data de hoje (2026-07). Antes de depender deste indice em produção:
 
-1. `git pull` (ou re-clone) o NeoPZ.
-2. Rode novamente: `python3 build_class_header_index.py /caminho/para/neopz --out ./header_index`.
+1. `git pull` (ou re-clone) o NeoPZ em `base_de_dados/neopz`.
+2. Rode novamente: `python3 indexer.py` (regenera `whitelist.txt`/`headers_whitelist.txt` e a base Chroma) e `python3 build_class_header_index.py ../base_de_dados/neopz --out .` (regenera este índice) — sempre os dois juntos, contra a mesma pasta, pra não voltarem a divergir.
 3. Repita periodicamente (ex: a cada release ou mensalmente) para manter o indice sincronizado com o codigo.
-
-Se o corpus do RAG foi montado sobre esse mesmo commit antigo, os dois estão pelo menos consistentes entre si — mas vale confirmar.
 
 ## Colisões (revisão manual)
 
@@ -25,6 +25,7 @@ Se o corpus do RAG foi montado sobre esse mesmo commit antigo, os dois estão pe
 - `TPZCurve`, `TPZLine`: classes genuinamente diferentes com o mesmo nome (uma em teste, outra não; ou em módulos distintos Topology/Util).
 - `SPr`, `TMem`, `TComputeSequence`, `TPlasticState`, `ThreadData`: tipos internos/aninhados reaproveitados entre headers relacionados.
 - `TinyFad`: especializações de template legítimas, espalhadas por 20 arquivos em `Common/FAD/TinyFad/Specializations/`.
+- **Novidade (após reconhecer `using`/`typedef`)**: nomes de alias genéricos que cada classe redefine internamente com o mesmo nome curto — `TBase`, `TFAD`, `EState`, `ESolutionVars`, `SOLUTIONVARS`, `MProblemType` etc. Não é ambiguidade real da API pública, é `using TBase = AlgumaCoisaEspecificaDaClasse;` dentro de várias classes de material diferentes — corretamente marcado como colisão porque não existe *um* header certo para esses nomes fora do contexto da classe que os declara. Não tente auto-corrigir `#include` para esses nomes.
 
 ## Uso sugerido no pipeline
 

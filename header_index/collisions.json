@@ -1,12 +1,150 @@
 {
+  "ApproximationSpace": [
+    "Publications/hdiv2dpaper201504.h",
+    "Publications/hdiv3dpaper201504.h",
+    "Publications/hdivCurvedJCompAppMath.h"
+  ],
+  "BFadREAL": [
+    "Material/BlackOil/TPZBlackOil2P3D.h",
+    "Material/needrefactor/REAL/pzblackoil2p3d.h",
+    "Material/needrefactor/REAL/pzmultiphase.h"
+  ],
+  "ESolutionVars": [
+    "Material/BlackOil/TPZBlackOil2P3D.h",
+    "Material/Poisson/TPZMatPoisson.h",
+    "Material/Projection/TPZHCurlProjection.h",
+    "Material/Projection/TPZHDivProjection.h",
+    "Material/Projection/TPZL2Projection.h",
+    "Material/Projection/TPZL2ProjectionCS.h",
+    "Material/needrefactor/REAL/pzblackoil2p3d.h"
+  ],
+  "EState": [
+    "Material/BlackOil/TPZBlackOil2P3D.h",
+    "Material/needrefactor/REAL/pzblackoil2p3d.h",
+    "Material/needrefactor/REAL/pzconvectionproblem.h",
+    "Material/needrefactor/REAL/pzmultiphase.h"
+  ],
+  "EWeightType": [
+    "SubStruct/tpzdohrsubstruct.h",
+    "SubStruct/tpzdohrsubstructCondense.h"
+  ],
+  "Eltype": [
+    "Publications/hdiv2dpaper201504.h",
+    "Publications/hdiv3dpaper201504.h",
+    "Publications/hdivCurvedJCompAppMath.h"
+  ],
+  "FatMem": [
+    "Geom/TPZGeoExtend.h",
+    "Geom/pzshapeextend.h",
+    "Shape/pzshapeextend.h"
+  ],
+  "FatTop": [
+    "Geom/TPZGeoExtend.h",
+    "Geom/pzshapeextend.h",
+    "Shape/pzshapeextend.h"
+  ],
+  "Geo": [
+    "Mesh/tpzgeoelmapped.h",
+    "Mesh/tpzgeoelrefpattern.h"
+  ],
+  "GraphElType": [
+    "Topology/tpzcube.h",
+    "Topology/tpzline.h",
+    "Topology/tpzprism.h",
+    "Topology/tpzpyramid.h",
+    "Topology/tpzquadrilateral.h",
+    "Topology/tpztetrahedron.h",
+    "Topology/tpztriangle.h"
+  ],
+  "IntruleType": [
+    "Topology/PrismExtend.h",
+    "Topology/tpzcube.h",
+    "Topology/tpzline.h",
+    "Topology/tpzpoint.h",
+    "Topology/tpzprism.h",
+    "Topology/tpzpyramid.h",
+    "Topology/tpzquadrilateral.h",
+    "Topology/tpztetrahedron.h",
+    "Topology/tpztriangle.h"
+  ],
+  "MMeshType": [
+    "Pre/MMeshType.h",
+    "Pre/TPZAcademicGeoMesh.h"
+  ],
+  "MPlane": [
+    "Material/Plasticity/TPZMohrCoulombNeto.h",
+    "Material/Plasticity/TPZMohrCoulombPV.h",
+    "Material/Plasticity/TPZYCMohrCoulombPV.h"
+  ],
+  "MProblemType": [
+    "Pre/TPZAnalyticSolution.h",
+    "Pre/TPZMHMeshControl.h"
+  ],
+  "SOLUTIONVARS": [
+    "Material/Elasticity/TPZElasticity3D.h",
+    "Material/Plasticity/TPZMatPorous.h",
+    "Material/needrefactor/REAL/pzviscoelastic.h"
+  ],
   "SPr": [
     "Geom/pzshapeextend.h",
     "Shape/pzshapeextend.h"
+  ],
+  "TBase": [
+    "Material/BlackOil/TPZBlackOil2P3D.h",
+    "Material/ConsLaw/TPZConsLaw.h",
+    "Material/DarcyFlow/TPZDarcyFlow.h",
+    "Material/DarcyFlow/TPZMixedDarcyFlow.h",
+    "Material/DarcyFlow/TPZMixedDarcyFractureFlow.h",
+    "Material/Elasticity/TPZElasticity2D.h",
+    "Material/Elasticity/TPZElasticity3D.h",
+    "Material/Electromagnetics/TPZPlanarWGScattering.h",
+    "Material/Electromagnetics/TPZWaveguideModalAnalysis.h",
+    "Material/Plasticity/TPZMatElastoPlastic.h",
+    "Material/Poisson/TPZMatPoisson.h",
+    "Material/Projection/TPZHCurlProjection.h",
+    "Material/Projection/TPZHDivProjection.h",
+    "Material/Projection/TPZL2Projection.h",
+    "Material/Projection/TPZL2ProjectionCS.h",
+    "Material/TPZLagrangeMultiplier.h",
+    "Material/TPZLagrangeMultiplierCS.h",
+    "Material/TPZNullMaterial.h",
+    "Material/TPZNullMaterialCS.h",
+    "Post/pzpostprocmat.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamH1.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamH1HCurl.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamHCurl.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamHCurlHDiv.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamHDiv.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamHDivL2.h",
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamL2.h"
   ],
   "TComputeSequence": [
     "Material/Plasticity/TPZMohrCoulombNeto.h",
     "Material/Plasticity/TPZMohrCoulombPV.h",
     "Material/Plasticity/TPZYCMohrCoulombPV.h"
+  ],
+  "TFAD": [
+    "Material/Plasticity/TPZLadeKim.h",
+    "Material/Plasticity/TPZLadeNelsonElasticResponse.h",
+    "Material/Plasticity/TPZPlasticityTest.h",
+    "Material/Plasticity/TPZYCLadeKim.h",
+    "Material/Plasticity/TPZYCSandlerDimaggio.h"
+  ],
+  "TFAD_SIX": [
+    "Material/Plasticity/TPZLadeNelsonElasticResponse.h",
+    "Material/Plasticity/TPZYCSandlerDimaggio.h"
+  ],
+  "TInterfaceBC": [
+    "Material/DarcyFlow/TPZIsotropicPermeability.h",
+    "Material/TPZMatCombinedSpaces.h",
+    "Material/TPZMatErrorCombinedSpaces.h",
+    "Material/TPZMatErrorSingleSpace.h",
+    "Material/TPZMatGeneralisedEigenVal.h",
+    "Material/TPZMatInterfaceCombinedSpaces.h",
+    "Material/TPZMatInterfaceSingleSpace.h",
+    "Material/TPZMatLoadCases.h",
+    "Material/TPZMatSingleSpace.h",
+    "Material/TPZMatWithMem.h"
   ],
   "TMem": [
     "Geom/pzgeopoint.h",
@@ -22,6 +160,10 @@
     "UnitTest_PZ/TestGeometry/TPZCurve.h",
     "UnitTest_PZ/TestIntegNum/TPZCurve.h"
   ],
+  "TPZDruckerPrager": [
+    "Material/Plasticity/TPZDruckerPrager.h",
+    "Material/Plasticity/TPZPlasticityTest.h"
+  ],
   "TPZLine": [
     "Topology/tpzline.h",
     "Util/pzline.h"
@@ -29,6 +171,14 @@
   "TPZMixedDarcyFlow": [
     "Material/DarcyFlow/TPZMixedDarcyFlow.h",
     "Material/needrefactor/REAL/TPZMixedDarcyFlow.h"
+  ],
+  "TPZMohrCoulomb": [
+    "Material/Plasticity/TPZMohrCoulomb.h",
+    "Material/Plasticity/TPZPlasticityTest.h"
+  ],
+  "TPZWillamWarnke": [
+    "Material/Plasticity/TPZPlasticityTest.h",
+    "Material/Plasticity/TPZWillamWarnke.h"
   ],
   "TPlasticState": [
     "Material/Plasticity/TPZMohrCoulombNeto.h",
@@ -62,5 +212,206 @@
     "Common/FAD/TinyFad/Specializations/tinyfadtwenty.h",
     "Common/FAD/TinyFad/Specializations/tinyfadtwo.h",
     "Common/FAD/TinyFad/tinyfad.h"
+  ],
+  "Top": [
+    "Geom/TPZGeoCube.h",
+    "Geom/TPZGeoExtend.h",
+    "Geom/TPZGeoLinear.h",
+    "Geom/pzgeopoint.h",
+    "Geom/pzgeoprism.h",
+    "Geom/pzgeopyramid.h",
+    "Geom/pzgeoquad.h",
+    "Geom/pzgeotetrahedra.h",
+    "Geom/pzgeotriangle.h",
+    "Geom/pzshapeextend.h",
+    "Geom/tpzgeoblend.h",
+    "Shape/pzshapeextend.h",
+    "Shape/pzshapepoint.h",
+    "SpecialMaps/TPZQuadSphere.h",
+    "SpecialMaps/tpzarc3d.h",
+    "SpecialMaps/tpzellipse3d.h",
+    "SpecialMaps/tpzquadraticcube.h",
+    "SpecialMaps/tpzquadraticline.h",
+    "SpecialMaps/tpzquadraticprism.h",
+    "SpecialMaps/tpzquadraticpyramid.h",
+    "SpecialMaps/tpzquadraticquad.h",
+    "SpecialMaps/tpzquadratictetra.h",
+    "SpecialMaps/tpzquadratictrig.h"
+  ],
+  "const_iterator": [
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "const_pointer": [
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "const_reference": [
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "dbl": [
+    "Common/pzreal.h",
+    "Topology/TPZTopologyUtils.h"
+  ],
+  "expr_t": [
+    "Common/FAD/Fad/fad.h",
+    "Common/FAD/Fad/fadfunc.h",
+    "Common/FAD/Fad/fadop.h",
+    "Common/FAD/TinyFadET/tfad.h",
+    "Common/FAD/TinyFadET/tfadop.h"
+  ],
+  "fNYields": [
+    "Material/Plasticity/TPZElasticCriterion.h",
+    "Material/Plasticity/TPZPlasticStep.h",
+    "Material/Plasticity/TPZPlasticStepPV.h",
+    "Material/Plasticity/TPZPorousElasticCriterion.h"
+  ],
+  "fadtype": [
+    "Material/Plasticity/TPZMohrCoulombNeto.h",
+    "Material/Plasticity/TPZMohrCoulombPV.h"
+  ],
+  "grad_type": [
+    "Common/FAD/TinyFad/Specializations/tinyfadeight.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeighteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeleven.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfifteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfive.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfour.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfourteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadnine.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadnineteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadone.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadseven.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadseventeen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadsix.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadsixteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadten.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadthirteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadthree.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwelve.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwenty.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwo.h"
+  ],
+  "iterator": [
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "pointer": [
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "pzgeom": [
+    "Geom/TPZGeoCube.h",
+    "Geom/TPZGeoExtend.h",
+    "Geom/TPZGeoLinear.h",
+    "Geom/pzgeopoint.h",
+    "Geom/pzgeoprism.h",
+    "Geom/pzgeopyramid.h",
+    "Geom/pzgeoquad.h",
+    "Geom/pzgeotetrahedra.h",
+    "Geom/pzgeotriangle.h",
+    "Geom/pznoderep.h",
+    "Geom/pznoderep.h.h",
+    "Geom/tpzgeoblend.h",
+    "SpecialMaps/TPZCylinder.h",
+    "SpecialMaps/TPZQuadSphere.h",
+    "SpecialMaps/TPZQuadTorus.h",
+    "SpecialMaps/TPZTriangleSphere.h",
+    "SpecialMaps/TPZTriangleTorus.h",
+    "SpecialMaps/TPZWavyLine.h",
+    "SpecialMaps/tpzarc3d.h",
+    "SpecialMaps/tpzellipse3d.h",
+    "SpecialMaps/tpzquadraticcube.h",
+    "SpecialMaps/tpzquadraticline.h",
+    "SpecialMaps/tpzquadraticprism.h",
+    "SpecialMaps/tpzquadraticpyramid.h",
+    "SpecialMaps/tpzquadraticquad.h",
+    "SpecialMaps/tpzquadratictetra.h",
+    "SpecialMaps/tpzquadratictrig.h"
+  ],
+  "pzinternal": [
+    "Common/pzerror.h",
+    "Util/pzlog.h"
+  ],
+  "pzrefine": [
+    "Refine/TPZRefCube.h",
+    "Refine/TPZRefLinear.h",
+    "Refine/pzrefpoint.h",
+    "Refine/pzrefprism.h",
+    "Refine/pzrefpyram.h",
+    "Refine/pzrefquad.h",
+    "Refine/pzreftetrahedra.h",
+    "Refine/pzreftriangle.h"
+  ],
+  "pzshape": [
+    "Geom/pzshapeextend.h",
+    "Shape/TPZShapeDisc.h",
+    "Shape/pzshapecube.h",
+    "Shape/pzshapeextend.h",
+    "Shape/pzshapelinear.h",
+    "Shape/pzshapepiram.h",
+    "Shape/pzshapepiramHdiv.h",
+    "Shape/pzshapepoint.h",
+    "Shape/pzshapeprism.h",
+    "Shape/pzshapequad.h",
+    "Shape/pzshapetetra.h",
+    "Shape/pzshapetriang.h"
+  ],
+  "pztopology": [
+    "Topology/PrismExtend.h",
+    "Topology/TPZTopologyUtils.h",
+    "Topology/tpzcube.h",
+    "Topology/tpzline.h",
+    "Topology/tpzpoint.h",
+    "Topology/tpzprism.h",
+    "Topology/tpzpyramid.h",
+    "Topology/tpzquadrilateral.h",
+    "Topology/tpztetrahedron.h",
+    "Topology/tpztriangle.h"
+  ],
+  "reference": [
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "size_type": [
+    "Common/FAD/utils/vectors.h",
+    "External/TPZBoostGraph.h",
+    "Util/TPZChunkVector.h"
+  ],
+  "type": [
+    "Common/FAD/TinyFadET/tfad.h",
+    "Common/pzreal.h"
+  ],
+  "value_type": [
+    "Common/FAD/Fad/fad.h",
+    "Common/FAD/Fad/fadfunc.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeight.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeighteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadeleven.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfifteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfive.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfour.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadfourteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadnine.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadnineteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadone.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadseven.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadseventeen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadsix.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadsixteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadten.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadthirteen.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadthree.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwelve.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwenty.h",
+    "Common/FAD/TinyFad/Specializations/tinyfadtwo.h",
+    "Common/FAD/TinyFad/tinyfad.h",
+    "Common/FAD/TinyFad/tinyfadbin.h",
+    "Common/FAD/TinyFadET/tfad.h",
+    "Common/FAD/utils/promote.h",
+    "Common/FAD/utils/tinyvec.h",
+    "Common/FAD/utils/vectors.h",
+    "Util/TPZChunkVector.h"
   ]
 }

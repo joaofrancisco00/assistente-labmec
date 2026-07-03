@@ -43,9 +43,16 @@ EXCLUDE_DIR_NAMES = {"build", ".git", "neopz-build"}
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
 
-CLASS_KW_RE = re.compile(r"\b(class|struct)\b")
+CLASS_KW_RE = re.compile(r"\b(class|struct|namespace|enum)\b")
 NAME_RE = re.compile(r"\s*([A-Za-z_]\w*)")
 TPZ_API_RE = re.compile(r"\s*TPZ_API\b")
+
+# using/typedef não seguem o padrão "keyword NOME" das demais: o `using` tem
+# o nome ANTES do '=', o `typedef` tem o nome no FINAL da instrução. Tratados
+# à parte em extract_alias_declarations().
+USING_ALIAS_RE = re.compile(r"\busing\s+([A-Za-z_]\w*)\s*=")
+TYPEDEF_STATEMENT_RE = re.compile(r"\btypedef\b([^;{}]*);")
+TYPEDEF_NAME_RE = re.compile(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*$")
 
 
 def strip_comments(text: str) -> str:
@@ -120,23 +127,40 @@ def preceded_by(text: str, pos: int, word: str) -> bool:
 
 
 def extract_declarations(text: str):
-    """Retorna lista de (name, kind, is_definition) encontrados no texto.
+    """Retorna lista de (name, kind, is_definition) encontrados no texto, para
+    declaracoes no formato 'keyword NOME' (class, struct, namespace, enum).
 
     Ignora ocorrencias de 'class'/'struct' que estao DENTRO de uma lista de
     parametros de template (ex: o 'T' em template<class T>) -- essas nunca
     sao a classe real sendo declarada, sao parametros de tipo.
+
+    'namespace' e tratado igual a class/struct: '{' logo em seguida = definicao
+    real (com corpo), ';' = forward declaration (raro/invalido em C++ para
+    namespace, mas inofensivo se aparecer).
+
+    'enum'/'enum class'/'enum struct' precisa de tratamento especial: (1) o
+    'class'/'struct' que aparece DEPOIS de 'enum' e pulado explicitamente aqui
+    (e tambem ignorado quando CLASS_KW_RE o encontra separadamente, via
+    preceded_by(..., "enum") logo abaixo) para nao virar uma declaracao
+    fantasma; (2) '{' = enum com corpo de valores (definicao real), ';' =
+    forward declaration de enum tipado (ex: 'enum class X : int;', C++11).
     """
     template_spans = find_template_spans(text)
     out = []
     for m in CLASS_KW_RE.finditer(text):
         kw_start = m.start()
+        keyword = m.group(1)
         if in_any_span(kw_start, template_spans):
             continue  # e so um parametro de template (class T), nao uma declaracao real
         if preceded_by(text, kw_start, "friend"):
             continue
-        if preceded_by(text, kw_start, "enum"):
-            continue
+        if keyword in ("class", "struct") and preceded_by(text, kw_start, "enum"):
+            continue  # e o 'class'/'struct' de 'enum class X' / 'enum struct X', ja tratado no match do 'enum'
         pos = m.end()
+        if keyword == "enum":
+            skip_m = re.match(r"\s*(class|struct)\s+", text[pos:pos + 40])
+            if skip_m:
+                pos += skip_m.end()
         # pula macro de export/dllimport, se houver (ex: class TPZ_API TPZX)
         api_m = TPZ_API_RE.match(text, pos)
         if api_m:
@@ -148,7 +172,36 @@ def extract_declarations(text: str):
         term, _ = scan_to_terminator(text, name_m.end())
         if term is None:
             continue
-        out.append((name, m.group(1), term == "{"))
+        out.append((name, keyword, term == "{"))
+    return out
+
+
+def extract_alias_declarations(text: str):
+    """Retorna lista de (name, kind, is_definition) para 'using X = ...;' e
+    'typedef ... X;' -- nao seguem o padrao 'keyword NOME' de
+    extract_declarations: o 'using' tem o nome ANTES do '=', o 'typedef' tem o
+    nome no FINAL da instrucao (ex: 'typedef std::pair<int,int> TPZFoo;').
+
+    Diferente de class/struct/namespace/enum, aqui nao existe o conceito de
+    'forward declaration' -- o ';' final E a propria definicao completa, entao
+    is_definition e sempre True.
+    """
+    template_spans = find_template_spans(text)
+    out = []
+
+    for m in USING_ALIAS_RE.finditer(text):
+        if in_any_span(m.start(), template_spans):
+            continue
+        out.append((m.group(1), "using", True))
+
+    for m in TYPEDEF_STATEMENT_RE.finditer(text):
+        if in_any_span(m.start(), template_spans):
+            continue
+        name_m = TYPEDEF_NAME_RE.search(m.group(1))
+        if not name_m:
+            continue
+        out.append((name_m.group(1), "typedef", True))
+
     return out
 
 
@@ -170,7 +223,7 @@ def build_index(root: str):
             continue
 
         text = strip_comments(raw)
-        for name, kind, is_def in extract_declarations(text):
+        for name, kind, is_def in extract_declarations(text) + extract_alias_declarations(text):
             if is_def:
                 definitions[name].add(relpath)
             else:

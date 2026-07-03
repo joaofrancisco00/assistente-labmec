@@ -21,7 +21,7 @@ except ImportError:
 from cpp_parser import find_tpz_classes_in_code
 
 # ── Configurações ──────────────────────────────────────────────────────────────
-OLLAMA_MODEL           = "assistente-labmec"
+OLLAMA_MODEL           = "qwen2.5-coder:7b"
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 INDEX_DIR              = Path("./banco_chroma")
 WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
@@ -43,6 +43,9 @@ EXAMPLE_POOL_MULT      = 6          # tamanho do pool buscado antes do boost por
 
 COL_HEADERS  = "neopz_headers"
 COL_EXAMPLES = "neopz_examples"
+COL_WIKI     = "neopz_wiki"        # documentação curada (wiki do professor)
+
+K_WIKI       = 3                   # chunks da wiki a recuperar por consulta
 
 # Headers "chute" que o modelo inventa e que NÃO existem no projeto — removidos
 # automaticamente na correção pós-geração (ver _corrigir_includes_automaticamente).
@@ -108,7 +111,22 @@ def _carregar_bancos(embeddings):
         embedding_function=embeddings,
         collection_name=COL_EXAMPLES,
     )
-    return headers_db, examples_db
+    # Wiki é opcional — só carrega se já foi indexada com indexer_wiki.py
+    wiki_db = None
+    try:
+        candidate = Chroma(
+            persist_directory=str(INDEX_DIR),
+            embedding_function=embeddings,
+            collection_name=COL_WIKI,
+        )
+        if candidate._collection.count() > 0:
+            wiki_db = candidate
+            print(f"  Wiki indexada: {candidate._collection.count()} chunks disponíveis")
+        else:
+            print("  Wiki não indexada ainda (rode indexer_wiki.py para ativá-la)")
+    except Exception:
+        print("  Wiki não indexada ainda (rode indexer_wiki.py para ativá-la)")
+    return headers_db, examples_db, wiki_db
 
 
 # ── Recuperação ────────────────────────────────────────────────────────────────
@@ -135,12 +153,12 @@ def _boost_por_classe(docs: list, classes_citadas: set, metadata_key: str) -> li
     return boost + resto
 
 
-def _recuperar_contexto(pergunta: str, headers_db, examples_db) -> tuple:
+def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None) -> tuple:
     """
-    Busca nas duas coleções com MMR (pool ampliado) e depois reordena (boost)
+    Busca nas coleções com MMR (pool ampliado) e depois reordena (boost)
     priorizando chunks cuja classe bate com alguma classe TPZ citada na
-    pergunta. Retorna (h_docs, e_docs, fontes).
-    MMR = Maximal Marginal Relevance — evita trazer chunks repetidos.
+    pergunta. Se wiki_db estiver disponível, inclui documentação curada.
+    Retorna (h_docs, e_docs, w_docs, fontes).
     """
     classes_citadas = find_tpz_classes_in_code(pergunta)
 
@@ -156,13 +174,21 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db) -> tuple:
     )
     e_docs = _boost_por_classe(e_pool, classes_citadas, "classes_usadas")[:K_EXAMPLES]
 
-    all_docs = h_docs + e_docs
+    # Wiki — documentação curada (API real, conceitos, bugs conhecidos)
+    w_docs = []
+    if wiki_db is not None:
+        w_pool = wiki_db.max_marginal_relevance_search(
+            pergunta, k=K_WIKI * EXAMPLE_POOL_MULT, fetch_k=K_WIKI * EXAMPLE_POOL_MULT * 2
+        )
+        w_docs = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")[:K_WIKI]
+
+    all_docs = h_docs + e_docs + w_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}
 
-    return h_docs, e_docs, fontes
+    return h_docs, e_docs, w_docs, fontes
 
 
-def _formatar_contexto(h_docs: list, e_docs: list) -> str:
+def _formatar_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> str:
     """Formata os documentos recuperados em um bloco de contexto legível."""
     partes = []
 
@@ -180,6 +206,15 @@ def _formatar_contexto(h_docs: list, e_docs: list) -> str:
             fonte = Path(doc.metadata.get("source", "")).name
             partes.append(f"[Arquivo: {fonte}]\n{doc.page_content}")
         partes.append("=== FIM DOS EXEMPLOS ===")
+
+    if w_docs:
+        partes.append("\n=== DOCUMENTAÇÃO VERIFICADA (wiki de análise) ===")
+        for doc in w_docs:
+            titulo = doc.metadata.get("titulo", Path(doc.metadata.get("source", "")).stem)
+            tipo   = doc.metadata.get("tipo", "")
+            label  = f"[{titulo} | {tipo}]" if tipo else f"[{titulo}]"
+            partes.append(f"{label}\n{doc.page_content}")
+        partes.append("=== FIM DA DOCUMENTAÇÃO ===")
 
     return "\n\n---\n\n".join(partes)
 
@@ -462,6 +497,7 @@ def gerar_codigo(
     system_base: str,
     class_header_index: dict = None,
     collisions: dict = None,
+    wiki_db=None,
 ) -> dict:
     """
     Executa o pipeline completo:
@@ -479,10 +515,10 @@ def gerar_codigo(
         print(f"  [Tentativa {tentativa}] Buscando contexto e gerando resposta...")
 
         # 1. Recupera documentos relevantes
-        h_docs, e_docs, fontes = _recuperar_contexto(pergunta, headers_db, examples_db)
+        h_docs, e_docs, w_docs, fontes = _recuperar_contexto(pergunta, headers_db, examples_db, wiki_db)
 
         # 2. Formata o contexto
-        contexto = _formatar_contexto(h_docs, e_docs)
+        contexto = _formatar_contexto(h_docs, e_docs, w_docs)
 
         # 3. Monta o prompt (com correções se for retry)
         prompt = _montar_prompt(
@@ -566,7 +602,7 @@ def main():
         encode_kwargs={"normalize_embeddings": True},
     )
 
-    headers_db, examples_db = _carregar_bancos(embeddings)
+    headers_db, examples_db, wiki_db = _carregar_bancos(embeddings)
     whitelist          = _carregar_whitelist()
     headers_whitelist  = _carregar_headers_whitelist()
     class_header_index = _carregar_class_header_index()
@@ -594,7 +630,7 @@ def main():
         resultado = gerar_codigo(
             pergunta, llm, headers_db, examples_db,
             whitelist, headers_whitelist, system_base,
-            class_header_index, collisions,
+            class_header_index, collisions, wiki_db,
         )
 
         print("\nAssistente LabMeC:\n")
