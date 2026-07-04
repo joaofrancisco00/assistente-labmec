@@ -363,6 +363,41 @@ def build_method_whitelist(base_path: Path) -> set:
     return methods
 
 
+def build_class_methods_index(base_path: Path) -> dict:
+    """
+    {classe: [metodos]} — mesma fonte de build_method_whitelist, mas SEM
+    achatar tudo num set global.
+
+    Por que isso existe além da whitelist global: para DETECTAR alucinação,
+    global é mais seguro (ver nota acima). Mas para CORRIGIR automaticamente
+    (reescrever o texto por um nome "parecido"), global é perigoso demais —
+    a whitelist global tem ~3900 nomes curtos e genéricos (Create*, Get*,
+    Set*, Add*...) repetidos de forma parecida em dezenas de classes
+    diferentes. Isso já causou uma correção automática ERRADA de verdade:
+    'TPZGeoMeshTools::CreateRectMesh' (inventado) virou
+    'TPZGeoMeshTools::CreateMesh' (nome de OUTRA classe, por coincidência de
+    string) em vez do método real 'CreateGeoMeshOnGrid'. Restringir a busca
+    por correspondência aos métodos que aparecem REALMENTE naquela classe
+    específica evita essa contaminação cruzada.
+
+    Retorna apenas os métodos vistos diretamente na declaração da classe
+    (não resolve herança) — por isso é usado só para tentar uma correção
+    automática de alta confiança; se a classe não estiver aqui ou não houver
+    candidato bom o bastante, a chamada some sem substituição, e continua
+    marcada como suspeita para revisão/instrução no prompt.
+    """
+    index: dict = {}
+    for h_file in base_path.rglob("*.h"):
+        for chunk in extract_classes_from_header(h_file):
+            if not chunk.methods:
+                continue
+            existentes = index.setdefault(chunk.class_name, [])
+            for m in chunk.methods:
+                if m not in existentes:
+                    existentes.append(m)
+    return index
+
+
 # Vincula variável -> classe TPZ, para restringir a checagem de método a
 # chamadas em objetos que a gente tem confiança razoável de que são de fato
 # instâncias TPZ (evita marcar chamadas de STL/C++ padrão como suspeitas,
@@ -370,6 +405,14 @@ def build_method_whitelist(base_path: Path) -> set:
 _BIND_AUTOPOINTER_RE = re.compile(r'\bTPZAutoPointer\s*<\s*(TPZ\w+)\s*>\s*[\*&]?\s*(\w+)\b')
 _BIND_POINTER_REF_RE = re.compile(r'\b(TPZ\w+)\s*[\*&]\s*(\w+)\s*(?:[=;]|\()')
 _BIND_STACK_VALUE_RE = re.compile(r'\b(TPZ\w+)\s+(\w+)\s*\(')
+# Declaração "nua" com construtor padrão, sem parênteses nem args (ex:
+# `TPZGeoMesh mesh;`) — faltava esse caso: sem ele, uma variável declarada
+# assim nunca é vinculada a nenhuma classe, e QUALQUER método chamado nela
+# (real ou inventado) passa batido pela validação, sem nenhum aviso. Já
+# aconteceu de verdade: `mesh.SetType(...)`, `mesh.AddVertex(...)`,
+# `mesh.GenerateMesh()` (tudo inventado) não foram sinalizados por causa
+# desse buraco.
+_BIND_BARE_VALUE_RE = re.compile(r'\b(TPZ\w+)\s+(\w+)\s*;')
 _BIND_AUTO_NEW_RE = re.compile(r'\bauto\s*[\*&]?\s*(\w+)\s*=\s*new\s+(TPZ\w+)\s*[\(<]')
 
 _METHOD_CALL_RE = re.compile(r'\b(\w+)\s*(?:->|\.)\s*([A-Za-z_]\w*)\s*\(')
@@ -390,7 +433,7 @@ def _bind_variables_to_classes(code: str) -> dict:
     for regex in (_BIND_AUTO_NEW_RE,):
         for var, cls in regex.findall(code):
             bindings.setdefault(var, cls)
-    for regex in (_BIND_AUTOPOINTER_RE, _BIND_POINTER_REF_RE, _BIND_STACK_VALUE_RE):
+    for regex in (_BIND_AUTOPOINTER_RE, _BIND_POINTER_REF_RE, _BIND_STACK_VALUE_RE, _BIND_BARE_VALUE_RE):
         for cls, var in regex.findall(code):
             bindings.setdefault(var, cls)
     return bindings

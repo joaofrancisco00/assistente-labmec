@@ -34,6 +34,15 @@ HEADERS_WHITELIST_FILE = INDEX_DIR / "headers_whitelist.txt"
 # "✅ validado", mesmo sendo o tipo mais comum de alucinação na prática.
 METHODS_WHITELIST_FILE = INDEX_DIR / "methods_whitelist.txt"
 
+# Índice {classe: [métodos]} — usado SÓ na correção automática de método, não
+# na detecção (que continua global, de propósito). Ver
+# cpp_parser.build_class_methods_index: uma correção automática baseada na
+# whitelist global já trocou 'CreateRectMesh' (inventado) por 'CreateMesh'
+# (método de OUTRA classe, parecido só por coincidência de string) em vez do
+# método real 'CreateGeoMeshOnGrid' — restringir a busca de correspondência
+# aos métodos da própria classe evita essa contaminação cruzada.
+CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
+
 # Índice determinístico classe -> header real (gerado por
 # header_index/build_class_header_index.py a partir do source do NeoPZ).
 # Mais forte que HEADERS_WHITELIST_FILE: aquele só checa se o NOME do header
@@ -82,11 +91,21 @@ def _carregar_headers_whitelist() -> set:
 
 def _carregar_methods_whitelist() -> set:
     if not METHODS_WHITELIST_FILE.exists():
-        print("⚠️  methods_whitelist.txt não encontrada — rode 'python3 build_methods_whitelist.py' (ou reindexe).")
+        print("⚠️  methods_whitelist.txt não encontrada — rode indexer.py.")
         return set()
     methods = set(METHODS_WHITELIST_FILE.read_text(encoding='utf-8').splitlines())
     print(f"  Whitelist de métodos: {len(methods)} reais")
     return methods
+
+
+def _carregar_class_methods_index() -> dict:
+    """Carrega {classe: [métodos]} — usado só na correção automática (ver comentário na constante)."""
+    if not CLASS_METHODS_INDEX_FILE.exists():
+        print("⚠️  class_methods_index.json não encontrado — rode indexer.py.")
+        return {}
+    dados = json.loads(CLASS_METHODS_INDEX_FILE.read_text(encoding='utf-8'))
+    print(f"  Índice classe→métodos: {len(dados)} classes mapeadas")
+    return dados
 
 
 def _carregar_class_header_index() -> dict:
@@ -470,6 +489,101 @@ def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set) -> lis
     return find_suspicious_method_calls(codigo, methods_whitelist, whitelist)
 
 
+# Cutoffs de confiança para substituição AUTOMÁTICA (sem depender do LLM
+# aceitar a sugestão) — mais altos que os usados só para SUGERIR no prompt
+# (0.6 em _sugerir_correcoes / 0.5 em _validar_includes), porque aqui o texto
+# é reescrito direto, então o risco de trocar errado por acaso importa mais.
+CUTOFF_CLASSE_AUTOMATICA = 0.80
+CUTOFF_METODO_AUTOMATICO = 0.78
+
+
+def _corrigir_classes_automaticamente(codigo: str, whitelist: set) -> tuple:
+    """
+    Correção determinística de nomes de classe TPZ "quase certos" — mesmo
+    princípio de _corrigir_includes_automaticamente, mas para o nome da
+    classe em si, não só o #include.
+
+    Motivação real: o modelo local (qwen2.5-coder:7b) inventou uma vez
+    'TPZGeomMeshTools' em vez de 'TPZGeoMeshTools' e repetiu o MESMO erro em
+    3 tentativas seguidas mesmo com a sugestão certa no prompt
+    (⚠️ CLASSES INVÁLIDAS: '...' Você quis dizer: TPZGeoMeshTools?) — ou seja,
+    depender do LLM aceitar a correção não é confiável o bastante sozinho.
+
+    Só substitui quando há um ÚNICO candidato de altíssima confiança
+    (cutoff >= 0.80): evita trocar por engano um nome que só parece com outro
+    por coincidência. Se não houver candidato confiante, o nome continua
+    alucinado e cai na instrução de correção via prompt (fallback existente).
+
+    Risco conhecido: a whitelist vem de um snapshot do NeoPZ de 2022 (ver
+    header_index/README.md) — uma classe nova de verdade (criada depois
+    desse snapshot) pode ser confundida com uma classe antiga parecida. As
+    substituições aplicadas aparecem no log ("🔧 Corrigido automaticamente"),
+    vale conferir de vez em quando.
+
+    Retorna (codigo_corrigido, lista_de_correcoes_aplicadas).
+    """
+    if not whitelist:
+        return codigo, []
+
+    usadas = find_tpz_classes_in_code(codigo)
+    alucinadas = [c for c in usadas if c not in whitelist]
+    if not alucinadas:
+        return codigo, []
+
+    correcoes = []
+    for errada in alucinadas:
+        candidatos = difflib.get_close_matches(errada, whitelist, n=1, cutoff=CUTOFF_CLASSE_AUTOMATICA)
+        if not candidatos:
+            continue
+        certa = candidatos[0]
+        codigo, n = re.subn(r'\b' + re.escape(errada) + r'\b', certa, codigo)
+        if n:
+            correcoes.append(f"{errada} → {certa}")
+    return codigo, correcoes
+
+
+def _corrigir_metodos_automaticamente(codigo: str, metodos_suspeitos: list, class_methods_index: dict) -> tuple:
+    """
+    Mesmo princípio de _corrigir_classes_automaticamente, mas para chamadas
+    de método.
+
+    IMPORTANTE — diferente da correção de classe: aqui a busca de
+    correspondência é restrita aos métodos da PRÓPRIA classe
+    (class_methods_index), não à whitelist global de métodos.
+    A whitelist global tem ~3900 nomes curtos e genéricos (Create*, Get*,
+    Set*...) repetidos de forma parecida em dezenas de classes — usá-la aqui
+    já causou uma correção automática ERRADA de verdade: 'CreateRectMesh'
+    (inventado) virou 'CreateMesh' (método de OUTRA classe, por coincidência
+    de string) em vez do método real 'CreateGeoMeshOnGrid'. Restringir à
+    própria classe evita essa contaminação cruzada — se a classe não estiver
+    no índice ou não houver candidato bom o bastante ali, a chamada
+    simplesmente NÃO é reescrita (fica marcada como suspeita mesmo, para
+    revisão/instrução no prompt), o que é o comportamento seguro.
+
+    Só troca o texto da CHAMADA em si (`->metodo(`, `.metodo(`,
+    `Classe::metodo(`), preservando o prefixo (`->`/`.`/`::`).
+
+    Retorna (codigo_corrigido, lista_de_correcoes_aplicadas).
+    """
+    if not class_methods_index or not metodos_suspeitos:
+        return codigo, []
+
+    correcoes = []
+    for classe, errado in metodos_suspeitos:
+        candidatos_da_classe = class_methods_index.get(classe)
+        if not candidatos_da_classe:
+            continue  # classe fora do índice (ou sem métodos capturados) — não arrisca
+        candidatos = difflib.get_close_matches(errado, candidatos_da_classe, n=1, cutoff=CUTOFF_METODO_AUTOMATICO)
+        if not candidatos:
+            continue
+        certo = candidatos[0]
+        padrao = re.compile(r'(->|\.|::)\s*' + re.escape(errado) + r'\s*\(')
+        codigo, n = padrao.subn(r'\1' + certo + '(', codigo)
+        if n:
+            correcoes.append(f"{classe}::{errado} → {classe}::{certo}")
+    return codigo, correcoes
+
+
 def _corrigir_includes_automaticamente(
     codigo: str,
     class_header_index: dict,
@@ -555,6 +669,7 @@ def gerar_codigo(
     collisions: dict = None,
     wiki_db=None,
     methods_whitelist: set = None,
+    class_methods_index: dict = None,
 ) -> dict:
     """
     Executa o pipeline completo:
@@ -563,6 +678,7 @@ def gerar_codigo(
     class_header_index = class_header_index or {}
     collisions = collisions or {}
     methods_whitelist = methods_whitelist or set()
+    class_methods_index = class_methods_index or {}
 
     classes_alucinadas = None
     includes_errados = None
@@ -591,19 +707,35 @@ def gerar_codigo(
 
         # 4.5 Correção determinística pós-geração — não depende do LLM obedecer
         #     a instrução de correção no prompt (na prática ele não obedece de
-        #     forma confiável: repete o mesmo header errado em retries).
+        #     forma confiável: chegou a repetir o mesmo nome/header errado em
+        #     3 tentativas seguidas mesmo com a sugestão certa no prompt).
         #     Só se aplica quando a resposta de fato contém código — em
         #     respostas de prosa (ex: "o que é a classe X") a classe é só
         #     citada no texto, não usada, então não faz sentido exigir/injetar
-        #     #include.
+        #     #include ou reescrever chamadas.
+        #
+        #     Ordem importa: classe primeiro (afeta o binding variável->classe
+        #     usado na correção de método, e afeta qual header é "o certo"),
+        #     depois método, depois include por último.
         tem_codigo = _resposta_contem_codigo(resposta)
         correcoes_automaticas = []
         if tem_codigo:
-            resposta, correcoes_automaticas = _corrigir_includes_automaticamente(
+            resposta, correcoes_classes = _corrigir_classes_automaticamente(resposta, whitelist)
+            correcoes_automaticas.extend(correcoes_classes)
+
+            metodos_suspeitos_pre_correcao = _validar_metodos(resposta, methods_whitelist, whitelist)
+            resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
+                resposta, metodos_suspeitos_pre_correcao, class_methods_index,
+            )
+            correcoes_automaticas.extend(correcoes_metodos)
+
+            resposta, correcoes_includes = _corrigir_includes_automaticamente(
                 resposta, class_header_index, collisions, headers_whitelist,
             )
+            correcoes_automaticas.extend(correcoes_includes)
+
             if correcoes_automaticas:
-                print(f"  🔧 Headers corrigidos automaticamente: {', '.join(correcoes_automaticas)}")
+                print(f"  🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
 
         # 5. Valida classes (sempre) E includes/métodos (só quando há código de fato)
         classes_alucinadas = _validar_codigo(resposta, whitelist)
@@ -674,6 +806,7 @@ def main():
     class_header_index = _carregar_class_header_index()
     collisions         = _carregar_collisions()
     methods_whitelist  = _carregar_methods_whitelist()
+    class_methods_index = _carregar_class_methods_index()
     system_base        = _carregar_system_prompt()
     llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE)
 
@@ -698,7 +831,7 @@ def main():
             pergunta, llm, headers_db, examples_db,
             whitelist, headers_whitelist, system_base,
             class_header_index, collisions, wiki_db,
-            methods_whitelist,
+            methods_whitelist, class_methods_index,
         )
 
         print("\nAssistente LabMeC:\n")

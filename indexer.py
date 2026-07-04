@@ -24,19 +24,23 @@ try:
 except ImportError:
     from langchain_community.vectorstores import Chroma
 
+import json
+
 from cpp_parser import (
     extract_classes_from_header,
     build_class_whitelist,
     build_header_whitelist,
     build_method_whitelist,
+    build_class_methods_index,
 )
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 BASE_DIR               = Path("./base_de_dados")   # pasta com .h e .cpp do NeoPZ
 INDEX_DIR              = Path("./banco_chroma")
-WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
-HEADERS_WHITELIST_FILE = INDEX_DIR / "headers_whitelist.txt"
-METHODS_WHITELIST_FILE = INDEX_DIR / "methods_whitelist.txt"
+WHITELIST_FILE          = INDEX_DIR / "whitelist.txt"
+HEADERS_WHITELIST_FILE  = INDEX_DIR / "headers_whitelist.txt"
+METHODS_WHITELIST_FILE  = INDEX_DIR / "methods_whitelist.txt"
+CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 
 # Nomes das coleções no ChromaDB (não mudar depois de indexado)
@@ -212,6 +216,17 @@ def _gerar_whitelist():
         sample = sorted(methods)[:6]
         print(f"  ✅ {len(methods)} métodos salvos em methods_whitelist.txt")
         print(f"     Exemplos: {', '.join(sample)}...")
+
+    # 4. Índice classe -> métodos (usado só na CORREÇÃO automática de método,
+    #    não na detecção — ver cpp_parser.build_class_methods_index)
+    class_methods = build_class_methods_index(BASE_DIR)
+    if not class_methods:
+        print("  ⚠️  Índice classe→métodos vazio.")
+    else:
+        CLASS_METHODS_INDEX_FILE.write_text(
+            json.dumps(class_methods, indent=2, sort_keys=True, ensure_ascii=False), encoding='utf-8'
+        )
+        print(f"  ✅ {len(class_methods)} classes mapeadas em class_methods_index.json")
 
 
 def main():
