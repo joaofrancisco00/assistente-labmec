@@ -28,6 +28,7 @@ from cpp_parser import (
     extract_classes_from_header,
     build_class_whitelist,
     build_header_whitelist,
+    build_method_whitelist,
 )
 
 # ── Configurações ──────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ BASE_DIR               = Path("./base_de_dados")   # pasta com .h e .cpp do NeoP
 INDEX_DIR              = Path("./banco_chroma")
 WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
 HEADERS_WHITELIST_FILE = INDEX_DIR / "headers_whitelist.txt"
+METHODS_WHITELIST_FILE = INDEX_DIR / "methods_whitelist.txt"
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 
 # Nomes das coleções no ChromaDB (não mudar depois de indexado)
@@ -171,11 +173,13 @@ def _indexar_exemplos(embeddings):
 def _gerar_whitelist():
     """
     Varre todos os .h e salva:
-      - whitelist.txt          → nomes de classes TPZ reais
+      - whitelist.txt          → nomes TPZ reais (classe/struct/namespace/using/typedef/enum)
       - headers_whitelist.txt  → nomes de headers .h reais
+      - methods_whitelist.txt  → nomes de método/função reais (whitelist GLOBAL,
+                                  não por classe — ver cpp_parser.build_method_whitelist)
     Esses arquivos são usados pelo pipeline para detectar alucinações.
     """
-    print("\n🔍 Gerando whitelists (classes + headers)...")
+    print("\n🔍 Gerando whitelists (classes + headers + métodos)...")
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -197,6 +201,16 @@ def _gerar_whitelist():
         HEADERS_WHITELIST_FILE.write_text('\n'.join(sorted(headers)), encoding='utf-8')
         sample = sorted(headers)[:6]
         print(f"  ✅ {len(headers)} headers salvos em headers_whitelist.txt")
+        print(f"     Exemplos: {', '.join(sample)}...")
+
+    # 3. Whitelist de métodos (global — não por classe, ver docstring do módulo)
+    methods = build_method_whitelist(BASE_DIR)
+    if not methods:
+        print("  ⚠️  Whitelist de métodos vazia.")
+    else:
+        METHODS_WHITELIST_FILE.write_text('\n'.join(sorted(methods)), encoding='utf-8')
+        sample = sorted(methods)[:6]
+        print(f"  ✅ {len(methods)} métodos salvos em methods_whitelist.txt")
         print(f"     Exemplos: {', '.join(sample)}...")
 
 

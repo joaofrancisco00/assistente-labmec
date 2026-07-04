@@ -91,22 +91,71 @@ def _extract_public_section(header_line: str, body: str) -> str:
     return f"{header_line} {{\n{body[:1200]}\n}};"
 
 
-def _extract_method_names(content: str) -> list:
-    """Extrai nomes de métodos públicos."""
-    blacklist = {'if', 'while', 'for', 'switch', 'return', 'else', 'do',
-                 'template', 'typename', 'decltype', 'sizeof', 'operator'}
+_METHOD_BLACKLIST = {'if', 'while', 'for', 'switch', 'return', 'else', 'do',
+                     'template', 'typename', 'decltype', 'sizeof', 'operator'}
 
-    pattern = re.compile(
-        r'(?:virtual\s+|static\s+|explicit\s+|inline\s+)*'
-        r'[\w:<>*&\s,~]+\s+(~?[a-zA-Z]\w*)\s*\([^;{)]*\)'
-        r'\s*(?:const\s*)?(?:override\s*)?(?:=\s*0\s*)?;',
-        re.MULTILINE
-    )
+# Só encontra o INÍCIO de uma possível declaração de método (prefixo de tipo +
+# nome + '('). O que vem depois do '(' é resolvido por _scan_matching_paren,
+# não por regex — parâmetros do tipo std::function<void(...)> têm parênteses
+# ANINHADOS, e um regex ingênuo tipo `\([^;{)]*\)` (que para no primeiro ')')
+# corta a assinatura no meio e perde o método inteiro. Isso já aconteceu de
+# verdade aqui: `SetExact(std::function<void (...)> f, int pOrder=1)` ficava
+# invisível à whitelist com o regex antigo, e SetExact é usado no tutorial
+# mais básico do NeoPZ — teria virado outro falso positivo de alucinação.
+_METHOD_NAME_START_RE = re.compile(
+    r'(?:virtual\s+|static\s+|explicit\s+|inline\s+)*'
+    r'[\w:<>*&\s,~]+\s+(~?[a-zA-Z]\w*)\s*\(',
+    re.MULTILINE
+)
+
+
+def _scan_matching_paren(text: str, open_pos: int) -> int:
+    """Encontra o ')' que fecha o '(' em open_pos, respeitando aninhamento
+    (necessário para assinaturas com std::function<...>, ponteiros de função,
+    etc, que têm parênteses dentro dos parênteses dos parâmetros)."""
+    depth = 0
+    i = open_pos
+    n = len(text)
+    in_string = False
+    while i < n:
+        c = text[i]
+        if in_string:
+            if c == '"' and text[i - 1] != '\\':
+                in_string = False
+        elif c == '"':
+            in_string = True
+        elif c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+# O que pode vir logo depois do ')' de uma declaração de método real:
+# 'const', 'override', '= 0' (pura virtual), e então ';' (declaração pura) ou
+# '{' (definida inline no header, comum em getters/setters simples do NeoPZ).
+_METHOD_TAIL_RE = re.compile(r'\s*(?:const\s*)?(?:override\s*)?(?:=\s*0\s*)?[;{]')
+
+
+def _extract_method_names(content: str) -> list:
+    """Extrai nomes de métodos (declarações puras + definidas inline no header),
+    com parênteses de parâmetros corretamente balanceados (ver _scan_matching_paren)."""
     names = []
-    for m in pattern.finditer(content):
+    for m in _METHOD_NAME_START_RE.finditer(content):
         name = m.group(1).strip()
-        if name and name not in blacklist and not name[0].isdigit():
-            names.append(name)
+        if not name or name in _METHOD_BLACKLIST or name[0].isdigit():
+            continue
+        paren_open = m.end() - 1  # último char do match é sempre o '(' literal
+        paren_close = _scan_matching_paren(content, paren_open)
+        if paren_close == -1:
+            continue
+        tail = content[paren_close + 1:paren_close + 60]
+        if not _METHOD_TAIL_RE.match(tail):
+            continue
+        names.append(name)
     return list(dict.fromkeys(names))  # mantém ordem, sem duplicatas
 
 
@@ -239,7 +288,7 @@ def extract_classes_from_header(filepath: Path) -> list:
             class_name=class_name,
             file_path=str(filepath),
             content=clean,
-            methods=methods[:15]
+            methods=methods  # lista completa; to_text() trunca só para exibição
         ))
 
     chunks.extend(_extract_simple_tpz_declarations(content, filepath))
@@ -280,3 +329,120 @@ def build_header_whitelist(base_path: Path) -> set:
 def find_tpz_classes_in_code(code: str) -> set:
     """Extrai todos os identificadores TPZxxx usados em um trecho de código."""
     return set(re.findall(r'\bTPZ[A-Z]\w+', code))
+
+
+# ── Validação de MÉTODOS (não só classe/header) ─────────────────────────────────
+#
+# Até aqui, só o NOME da classe e do header eram validados — um método
+# inventado numa classe real (ex: `gmesh->SetBoundaryTypeFancy(1)`, sendo
+# TPZGeoMesh uma classe real) passava batido: a classe existe, o header
+# existe, "✅ validado". Na prática, inventar um método de uma classe real é
+# um jeito bem mais comum de alucinar do que inventar a classe inteira.
+#
+# Escolha de design: whitelist GLOBAL de métodos (não por classe). Fazer a
+# checagem por classe exigiria inferir herança (o NeoPZ tem hierarquias
+# profundas e com múltipla herança/templates) — arriscado demais de acertar só
+# com regex, e um falso positivo aqui é pior que não checar nada (é
+# literalmente o que já aconteceu com o bug do namespace: o guard-rail
+# empurrando o modelo para longe do código certo). Uma whitelist global pega o
+# caso mais danoso (método que não existe em NENHUM lugar do NeoPZ) sem correr
+# esse risco.
+
+
+def build_method_whitelist(base_path: Path) -> set:
+    """
+    Varre todos os .h e retorna o conjunto de nomes de método/função
+    encontrados dentro de qualquer classe/struct/namespace (via
+    extract_classes_from_header, que já lida com corpo completo, inline vs.
+    declaração pura, etc). Usado pelo indexer para a whitelist de métodos.
+    """
+    methods = set()
+    for h_file in base_path.rglob("*.h"):
+        for chunk in extract_classes_from_header(h_file):
+            methods.update(chunk.methods)
+    return methods
+
+
+# Vincula variável -> classe TPZ, para restringir a checagem de método a
+# chamadas em objetos que a gente tem confiança razoável de que são de fato
+# instâncias TPZ (evita marcar chamadas de STL/C++ padrão como suspeitas,
+# ex: vetor.push_back(), que nunca estariam numa whitelist do NeoPZ).
+_BIND_AUTOPOINTER_RE = re.compile(r'\bTPZAutoPointer\s*<\s*(TPZ\w+)\s*>\s*[\*&]?\s*(\w+)\b')
+_BIND_POINTER_REF_RE = re.compile(r'\b(TPZ\w+)\s*[\*&]\s*(\w+)\s*(?:[=;]|\()')
+_BIND_STACK_VALUE_RE = re.compile(r'\b(TPZ\w+)\s+(\w+)\s*\(')
+_BIND_AUTO_NEW_RE = re.compile(r'\bauto\s*[\*&]?\s*(\w+)\s*=\s*new\s+(TPZ\w+)\s*[\(<]')
+
+_METHOD_CALL_RE = re.compile(r'\b(\w+)\s*(?:->|\.)\s*([A-Za-z_]\w*)\s*\(')
+_QUALIFIED_CALL_RE = re.compile(r'\b(TPZ\w+)::([A-Za-z_]\w*)\s*\(')
+
+
+def _bind_variables_to_classes(code: str) -> dict:
+    """
+    Heurística leve para inferir {nome_da_variavel: ClasseTPZ} a partir de
+    declarações no próprio trecho de código gerado. Não é um parser de C++
+    completo (não resolve typedefs locais, não segue reatribuições) — é
+    suficiente para os padrões de código NeoPZ mais comuns (ver
+    reference_solutions/task_03_poisson2d/poisson.cpp).
+    """
+    bindings = {}
+    # ordem: dos mais específicos para os mais genéricos, para que um bind
+    # mais específico não seja sobrescrito por um genérico depois
+    for regex in (_BIND_AUTO_NEW_RE,):
+        for var, cls in regex.findall(code):
+            bindings.setdefault(var, cls)
+    for regex in (_BIND_AUTOPOINTER_RE, _BIND_POINTER_REF_RE, _BIND_STACK_VALUE_RE):
+        for cls, var in regex.findall(code):
+            bindings.setdefault(var, cls)
+    return bindings
+
+
+def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None) -> list:
+    """
+    Retorna uma lista de (variavel_ou_classe, metodo) para chamadas de método
+    que:
+      (a) foram feitas em uma variável que a heurística conseguiu associar com
+          confiança a uma classe TPZ (ex: `gmesh->Foo()` onde `gmesh` foi
+          declarado como `TPZAutoPointer<TPZGeoMesh> gmesh = ...`), OU
+      (b) são chamadas qualificadas explícitas `TPZAlgumaCoisa::Foo(...)`;
+    e cujo nome de método NÃO aparece na whitelist global de métodos.
+
+    Chamadas em variáveis de tipo desconhecido (int, std::vector, ponteiro
+    genérico, etc) são ignoradas de propósito — não dá pra saber se são
+    métodos do NeoPZ ou de outra coisa, e marcar isso geraria falso positivo
+    (ex: vetor.push_back(x) não é NeoPZ, não deveria ser sinalizado).
+    """
+    if not method_whitelist:
+        return []
+
+    class_whitelist = class_whitelist or set()
+    bindings = _bind_variables_to_classes(code)
+
+    suspeitos = []
+    seen = set()
+
+    for var, method in _METHOD_CALL_RE.findall(code):
+        cls = bindings.get(var)
+        if not cls:
+            continue
+        # construtor/destrutor explícito (ex: `gmesh->~TPZGeoMesh()`, raro mas
+        # válido) ou chamada cujo "método" é na verdade o nome da classe
+        if method in (cls, f"~{cls}"):
+            continue
+        if method not in method_whitelist:
+            key = (cls, method)
+            if key not in seen:
+                seen.add(key)
+                suspeitos.append(key)
+
+    for cls, method in _QUALIFIED_CALL_RE.findall(code):
+        if cls not in class_whitelist:
+            continue  # classe já é desconhecida — isso é alucinação de classe, não de método
+        if method in (cls, f"~{cls}"):
+            continue
+        if method not in method_whitelist:
+            key = (cls, method)
+            if key not in seen:
+                seen.add(key)
+                suspeitos.append(key)
+
+    return suspeitos

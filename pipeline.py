@@ -18,7 +18,7 @@ try:
 except ImportError:
     from langchain_community.vectorstores import Chroma
 
-from cpp_parser import find_tpz_classes_in_code
+from cpp_parser import find_tpz_classes_in_code, find_suspicious_method_calls
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 OLLAMA_MODEL           = "qwen2.5-coder:7b"
@@ -26,6 +26,13 @@ EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 INDEX_DIR              = Path("./banco_chroma")
 WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
 HEADERS_WHITELIST_FILE = INDEX_DIR / "headers_whitelist.txt"
+
+# Whitelist GLOBAL de métodos (não por classe — ver nota em
+# cpp_parser.find_suspicious_method_calls sobre por que não tentamos herança).
+# Antes desta validação, só classe e header eram checados: um método inventado
+# numa classe real (ex: `gmesh->SetBoundaryTypeFancy(1)`) passava como
+# "✅ validado", mesmo sendo o tipo mais comum de alucinação na prática.
+METHODS_WHITELIST_FILE = INDEX_DIR / "methods_whitelist.txt"
 
 # Índice determinístico classe -> header real (gerado por
 # header_index/build_class_header_index.py a partir do source do NeoPZ).
@@ -71,6 +78,15 @@ def _carregar_headers_whitelist() -> set:
     headers = set(HEADERS_WHITELIST_FILE.read_text(encoding='utf-8').splitlines())
     print(f"  Whitelist de headers: {len(headers)} reais")
     return headers
+
+
+def _carregar_methods_whitelist() -> set:
+    if not METHODS_WHITELIST_FILE.exists():
+        print("⚠️  methods_whitelist.txt não encontrada — rode 'python3 build_methods_whitelist.py' (ou reindexe).")
+        return set()
+    methods = set(METHODS_WHITELIST_FILE.read_text(encoding='utf-8').splitlines())
+    print(f"  Whitelist de métodos: {len(methods)} reais")
+    return methods
 
 
 def _carregar_class_header_index() -> dict:
@@ -240,6 +256,8 @@ def _montar_prompt(
     classes_alucinadas: list = None,
     includes_errados: dict = None,
     includes_por_classe: dict = None,
+    metodos_suspeitos: list = None,
+    methods_whitelist: set = None,
 ) -> str:
     """
     Monta o prompt completo como string.
@@ -291,6 +309,26 @@ def _montar_prompt(
         instrucao_correcao += (
             "\n\n⚠️ HEADERS FALTANDO (segundo índice classe→header, fonte de verdade):\n"
             + "\n".join(linhas_idx)
+        )
+
+    # Correção de métodos inventados (whitelist global — ver _validar_metodos)
+    if metodos_suspeitos:
+        linhas_met = []
+        for classe, metodo in metodos_suspeitos:
+            sugestoes = difflib.get_close_matches(metodo, methods_whitelist or set(), n=3, cutoff=0.6)
+            if sugestoes:
+                linhas_met.append(
+                    f"  - '{classe}::{metodo}' NÃO existe no NeoPZ. Você quis dizer: {', '.join(sugestoes)}?"
+                )
+            else:
+                linhas_met.append(
+                    f"  - '{classe}::{metodo}' NÃO existe no NeoPZ e não há método parecido. "
+                    f"Use apenas métodos que aparecem nas declarações de classe do contexto."
+                )
+        instrucao_correcao += (
+            "\n\n⚠️ MÉTODOS INVENTADOS:\n"
+            + "\n".join(linhas_met)
+            + "\nNÃO use um método só porque parece lógico — confira nas declarações de classe do contexto."
         )
 
     if instrucao_correcao:
@@ -414,6 +452,24 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
     return faltando
 
 
+def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set) -> list:
+    """
+    Verifica se os métodos chamados no código (em variáveis que a heurística
+    conseguiu associar a uma classe TPZ, ou em chamadas qualificadas
+    TPZClasse::Metodo) existem em ALGUM LUGAR do NeoPZ.
+
+    Whitelist é GLOBAL, não por classe (ver nota em
+    cpp_parser.find_suspicious_method_calls sobre a troca deliberada de
+    precisão por segurança contra falso positivo — herança do NeoPZ é
+    profunda demais para inferir só com regex).
+
+    Retorna lista de (classe, metodo) suspeitos — vazia = tudo OK.
+    """
+    if not methods_whitelist:
+        return []
+    return find_suspicious_method_calls(codigo, methods_whitelist, whitelist)
+
+
 def _corrigir_includes_automaticamente(
     codigo: str,
     class_header_index: dict,
@@ -498,6 +554,7 @@ def gerar_codigo(
     class_header_index: dict = None,
     collisions: dict = None,
     wiki_db=None,
+    methods_whitelist: set = None,
 ) -> dict:
     """
     Executa o pipeline completo:
@@ -505,10 +562,12 @@ def gerar_codigo(
     """
     class_header_index = class_header_index or {}
     collisions = collisions or {}
+    methods_whitelist = methods_whitelist or set()
 
     classes_alucinadas = None
     includes_errados = None
     includes_por_classe = None
+    metodos_suspeitos = None
     correcoes_automaticas = []
 
     for tentativa in range(1, MAX_RETRIES + 2):
@@ -524,6 +583,7 @@ def gerar_codigo(
         prompt = _montar_prompt(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
             classes_alucinadas, includes_errados, includes_por_classe,
+            metodos_suspeitos, methods_whitelist,
         )
 
         # 4. Chama o modelo
@@ -545,23 +605,26 @@ def gerar_codigo(
             if correcoes_automaticas:
                 print(f"  🔧 Headers corrigidos automaticamente: {', '.join(correcoes_automaticas)}")
 
-        # 5. Valida classes (sempre) E includes (só quando há código de fato)
+        # 5. Valida classes (sempre) E includes/métodos (só quando há código de fato)
         classes_alucinadas = _validar_codigo(resposta, whitelist)
         if tem_codigo:
             includes_errados = _validar_includes(resposta, headers_whitelist)
             includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
+            metodos_suspeitos = _validar_metodos(resposta, methods_whitelist, whitelist)
         else:
             includes_errados = {}
             includes_por_classe = {}
+            metodos_suspeitos = []
 
-        if not classes_alucinadas and not includes_errados and not includes_por_classe:
-            print("  ✅ Validação OK — classes e headers existem e estão corretos no NeoPZ!")
+        if not classes_alucinadas and not includes_errados and not includes_por_classe and not metodos_suspeitos:
+            print("  ✅ Validação OK — classes, headers e métodos existem e estão corretos no NeoPZ!")
             return {
                 "resposta":             resposta,
                 "valido":               True,
                 "alucinacoes":          [],
                 "includes":             {},
                 "includes_por_classe":  {},
+                "metodos_suspeitos":    [],
                 "correcoes_automaticas": correcoes_automaticas,
                 "fontes":               fontes,
                 "tentativas":           tentativa,
@@ -573,6 +636,8 @@ def gerar_codigo(
             print(f"  ⚠️  Headers não encontrados: {', '.join(includes_errados.keys())}")
         if includes_por_classe:
             print(f"  ⚠️  Header errado/faltando para classe: {includes_por_classe}")
+        if metodos_suspeitos:
+            print(f"  ⚠️  Métodos não encontrados: {metodos_suspeitos}")
 
         if tentativa >= MAX_RETRIES + 1:
             print("  ⚠️  Limite de tentativas atingido.")
@@ -586,6 +651,7 @@ def gerar_codigo(
         "alucinacoes":          classes_alucinadas or [],
         "includes":             includes_errados or {},
         "includes_por_classe":  includes_por_classe or {},
+        "metodos_suspeitos":    metodos_suspeitos or [],
         "correcoes_automaticas": correcoes_automaticas,
         "fontes":               fontes,
         "tentativas":           tentativa,
@@ -607,6 +673,7 @@ def main():
     headers_whitelist  = _carregar_headers_whitelist()
     class_header_index = _carregar_class_header_index()
     collisions         = _carregar_collisions()
+    methods_whitelist  = _carregar_methods_whitelist()
     system_base        = _carregar_system_prompt()
     llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE)
 
@@ -631,6 +698,7 @@ def main():
             pergunta, llm, headers_db, examples_db,
             whitelist, headers_whitelist, system_base,
             class_header_index, collisions, wiki_db,
+            methods_whitelist,
         )
 
         print("\nAssistente LabMeC:\n")
@@ -647,8 +715,12 @@ def main():
         if resultado["includes_por_classe"]:
             faltando_fmt = ", ".join(f"{c} → {h}" for c, h in resultado["includes_por_classe"].items())
             print(f"⚠️  Header incorreto/faltando para classe (índice determinístico): {faltando_fmt}")
-        if not resultado["alucinacoes"] and not resultado["includes"] and not resultado["includes_por_classe"]:
-            print("✅ Resposta validada — classes e headers existem e estão corretos no NeoPZ")
+        if resultado["metodos_suspeitos"]:
+            metodos_fmt = ", ".join(f"{c}::{m}" for c, m in resultado["metodos_suspeitos"])
+            print(f"⚠️  Métodos não encontrados no NeoPZ (whitelist global): {metodos_fmt}")
+        if (not resultado["alucinacoes"] and not resultado["includes"]
+                and not resultado["includes_por_classe"] and not resultado["metodos_suspeitos"]):
+            print("✅ Resposta validada — classes, headers e métodos existem e estão corretos no NeoPZ")
 
         # Fontes usadas
         fontes_curtas = [Path(f).name for f in resultado["fontes"]]
