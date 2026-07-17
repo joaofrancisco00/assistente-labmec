@@ -12,6 +12,9 @@ banco_chroma/
 # NeoPZ (repositório separado)
 base_de_dados/neopz/
 
+# Log de interações (dataset local — cresce a cada conversa)
+logs/
+
 # Sistema / editor
 .DS_Store
 .vscode/

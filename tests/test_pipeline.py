@@ -3,7 +3,9 @@ Testes das funções puras de validação/correção do pipeline (sem LLM/Chroma
 
 Rodar:  python3 -m unittest discover -s tests -v
 """
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -102,17 +104,23 @@ class TestRenomeacoes(unittest.TestCase):
         self.assertEqual(correcoes, [])
 
     def test_arquivo_renames_do_projeto_e_valido(self):
-        # O renames.json versionado deve carregar e apontar só para classes
-        # que existem na whitelist real
+        # O renames.json versionado deve carregar e cada entrada deve fazer
+        # sentido: a classe antiga foi removida (correção automática) OU só
+        # existe no legado (dica no aviso "prefira a API atual"); o destino
+        # sempre existe e não é ele próprio do legado.
         renames = pipeline._carregar_renames()
         self.assertIn("TPZMatLaplacian", renames)
         whitelist = set(
             Path("banco_chroma/whitelist.txt").read_text(encoding="utf-8").splitlines())
+        legado = set(
+            Path("banco_chroma/legacy_classes.txt").read_text(encoding="utf-8").splitlines())
         for antiga, nova in renames.items():
-            self.assertNotIn(antiga, whitelist,
-                             f"'{antiga}' ainda existe — entrada desnecessária")
+            self.assertTrue(antiga not in whitelist or antiga in legado,
+                            f"'{antiga}' existe na API atual — entrada desnecessária")
             self.assertIn(nova, whitelist,
                           f"'{nova}' não existe na whitelist — entrada inválida")
+            self.assertNotIn(nova, legado,
+                             f"'{nova}' é do legado — destino de rename deve ser da API atual")
 
 
 class TestDespriorizacaoDeLegado(unittest.TestCase):
@@ -126,6 +134,44 @@ class TestDespriorizacaoDeLegado(unittest.TestCase):
         ]
         ordenados = pipeline._despriorizar_legado(docs)
         self.assertEqual([d.page_content for d in ordenados], ["b", "d", "a", "c"])
+
+
+class TestLogDeInteracoes(unittest.TestCase):
+    RESULTADO = {
+        "resposta": "TPZGeoMesh *g = new TPZGeoMesh();",
+        "valido": True,
+        "tentativas": 1,
+        "correcoes_automaticas": [],
+        "alucinacoes": [],
+        "includes": {},
+        "includes_por_classe": {},
+        "metodos_suspeitos": [("TPZGeoMesh", "Foo")],
+        "classes_legado": ["TPZMatVelha"],
+        "fontes": {"b.h", "a.h"},
+    }
+
+    def test_linhas_jsonl_validas_e_acumulativas(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            caminho = Path(tmp) / "logs" / "interacoes.jsonl"
+            pipeline._registrar_interacao("primeira pergunta", self.RESULTADO, caminho)
+            pipeline._registrar_interacao("segunda pergunta", self.RESULTADO, caminho)
+            linhas = caminho.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(len(linhas), 2)
+        registro = json.loads(linhas[0])
+        self.assertEqual(registro["pergunta"], "primeira pergunta")
+        self.assertTrue(registro["valido"])
+        self.assertEqual(registro["metodos_suspeitos"], ["TPZGeoMesh::Foo"])
+        self.assertEqual(registro["classes_legado"], ["TPZMatVelha"])
+        self.assertEqual(registro["fontes"], ["a.h", "b.h"])
+
+    def test_falha_de_log_nao_derruba_o_chat(self):
+        # Caminho impossível (arquivo no lugar do diretório) — deve só avisar
+        with tempfile.TemporaryDirectory() as tmp:
+            bloqueio = Path(tmp) / "logs"
+            bloqueio.write_text("sou um arquivo, não um diretório")
+            caminho = bloqueio / "interacoes.jsonl"
+            pipeline._registrar_interacao("pergunta", self.RESULTADO, caminho)  # não levanta
 
 
 class TestDeteccaoDeCodigo(unittest.TestCase):

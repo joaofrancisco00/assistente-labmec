@@ -1,4 +1,5 @@
 from pathlib import Path
+import datetime
 import re
 import json
 import difflib
@@ -18,7 +19,7 @@ try:
 except ImportError:
     from langchain_community.vectorstores import Chroma
 
-from cpp_parser import find_tpz_classes_in_code, find_suspicious_method_calls
+from cpp_parser import DIRS_LEGADO, find_tpz_classes_in_code, find_suspicious_method_calls
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 OLLAMA_MODEL           = "qwen2.5-coder:7b"
@@ -60,6 +61,18 @@ CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
 HEADER_INDEX_DIR        = Path("./header_index")
 CLASS_HEADER_INDEX_FILE  = HEADER_INDEX_DIR / "class_header_index.json"
 COLLISIONS_FILE          = HEADER_INDEX_DIR / "collisions.json"
+
+# Segundo nível da whitelist: classes que SÓ existem nos diretórios legados
+# do NeoPZ (needrefactor/, PerfTests/) — existem de verdade (usar não é
+# alucinação nem bloqueia), mas geram aviso "prefira a API atual".
+# Gerado pelo indexer (build_tiered_class_whitelist).
+LEGACY_CLASSES_FILE     = INDEX_DIR / "legacy_classes.txt"
+
+# Log de interações em JSONL (uma linha JSON por pergunta respondida).
+# Motivo: com revisão humana ocasional, os pares (pergunta, resposta validada)
+# viram de graça o conjunto de avaliação — e um eventual dataset de
+# fine-tuning — sem trabalho extra de curadoria depois.
+LOG_INTERACOES_FILE     = Path("./logs/interacoes.jsonl")
 
 # Mapa CURADO {classe_antiga: classe_atual} de renomeações conhecidas entre
 # versões do NeoPZ (ex: TPZMatLaplacian → TPZMatPoisson na refatoração de
@@ -139,6 +152,17 @@ def _carregar_class_header_index() -> dict:
     dados = json.loads(CLASS_HEADER_INDEX_FILE.read_text(encoding='utf-8'))
     print(f"  Índice classe→header: {len(dados)} classes mapeadas")
     return dados
+
+
+def _carregar_legacy_classes() -> set:
+    """Classes que só existem no legado (ver LEGACY_CLASSES_FILE). Opcional —
+    sem o arquivo (indexer antigo), o pipeline segue sem o aviso."""
+    if not LEGACY_CLASSES_FILE.exists():
+        return set()
+    classes = set(LEGACY_CLASSES_FILE.read_text(encoding='utf-8').splitlines()) - {""}
+    if classes:
+        print(f"  Classes da API antiga (aviso, não erro): {len(classes)}")
+    return classes
 
 
 def _carregar_renames() -> dict:
@@ -491,6 +515,8 @@ Classes TPZ reais relacionadas a esta tarefa (todas existem no NeoPZ):
 INSTRUÇÕES:
 - Use apenas classes cujos headers aparecem no contexto
 - Use apenas métodos visíveis nas declarações de classe acima
+- Prefira SEMPRE a API atual do NeoPZ (ex: TPZMatPoisson, std::function em
+  SetForcingFunction) em vez da API antiga (TPZDummyFunction, TPZMatPoisson3d)
 - Sempre inclua os #include específicos necessários
 - Siga os padrões dos exemplos de uso
 - Se não tiver certeza do nome exato, escreva: // TODO: verificar nome
@@ -801,6 +827,35 @@ def _corrigir_includes_automaticamente(
     return "\n".join(linhas), correcoes
 
 
+# ── Log de interações (dataset futuro de avaliação/fine-tuning) ────────────────
+
+def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INTERACOES_FILE):
+    """
+    Acrescenta a interação ao JSONL (uma linha JSON auto-contida por resposta).
+    Ver comentário em LOG_INTERACOES_FILE. Nunca deve derrubar o chat — em caso
+    de erro, avisa e segue.
+    """
+    try:
+        caminho.parent.mkdir(parents=True, exist_ok=True)
+        registro = {
+            "quando":                datetime.datetime.now().isoformat(timespec="seconds"),
+            "pergunta":              pergunta,
+            "resposta":              resultado["resposta"],
+            "valido":                resultado["valido"],
+            "tentativas":            resultado["tentativas"],
+            "correcoes_automaticas": resultado["correcoes_automaticas"],
+            "alucinacoes":           resultado["alucinacoes"],
+            "includes_errados":      sorted(resultado["includes"].keys()),
+            "metodos_suspeitos":     [f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]],
+            "classes_legado":        resultado.get("classes_legado", []),
+            "fontes":                sorted(resultado["fontes"]),
+        }
+        with caminho.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"  (log de interações falhou: {e})")
+
+
 # ── Pipeline principal ─────────────────────────────────────────────────────────
 
 def gerar_codigo(
@@ -817,6 +872,7 @@ def gerar_codigo(
     methods_whitelist: set = None,
     class_methods_index: dict = None,
     renames: dict = None,
+    legacy_classes: set = None,
 ) -> dict:
     """
     Executa o pipeline completo:
@@ -828,6 +884,7 @@ def gerar_codigo(
     methods_whitelist = methods_whitelist or set()
     class_methods_index = class_methods_index or {}
     renames = renames or {}
+    legacy_classes = legacy_classes or set()
 
     classes_alucinadas = None
     includes_errados = None
@@ -907,6 +964,11 @@ def gerar_codigo(
             includes_por_classe = {}
             metodos_suspeitos = []
 
+        # Segundo nível da whitelist: classe que existe, mas só no legado —
+        # aviso informativo, NÃO bloqueia nem dispara retry (ver
+        # LEGACY_CLASSES_FILE; um falso "alucinação" aqui seria pior que o aviso)
+        classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
+
         if not classes_alucinadas and not includes_errados and not includes_por_classe and not metodos_suspeitos:
             print("  ✅ Nomes verificados — classes, headers e métodos existem no NeoPZ "
                   "(semântica e assinaturas não são checadas)")
@@ -917,6 +979,7 @@ def gerar_codigo(
                 "includes":             {},
                 "includes_por_classe":  {},
                 "metodos_suspeitos":    [],
+                "classes_legado":       classes_legado_usadas,
                 "correcoes_automaticas": correcoes_automaticas,
                 "fontes":               fontes,
                 "tentativas":           tentativa,
@@ -982,6 +1045,7 @@ def gerar_codigo(
         "includes":             includes_errados or {},
         "includes_por_classe":  includes_por_classe or {},
         "metodos_suspeitos":    metodos_suspeitos or [],
+        "classes_legado":       classes_legado_usadas,
         "correcoes_automaticas": correcoes_automaticas,
         "fontes":               fontes,
         "tentativas":           tentativa,
@@ -1006,6 +1070,7 @@ def main():
     methods_whitelist  = _carregar_methods_whitelist()
     class_methods_index = _carregar_class_methods_index()
     renames            = _carregar_renames()
+    legacy_classes     = _carregar_legacy_classes()
     system_base        = _carregar_system_prompt()
     llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
 
@@ -1031,7 +1096,7 @@ def main():
             whitelist, headers_whitelist, system_base,
             class_header_index, collisions, wiki_db,
             methods_whitelist, class_methods_index,
-            renames,
+            renames, legacy_classes,
         )
 
         print("\nAssistente LabMeC:\n")
@@ -1051,6 +1116,13 @@ def main():
         if resultado["metodos_suspeitos"]:
             metodos_fmt = ", ".join(f"{c}::{m}" for c, m in resultado["metodos_suspeitos"])
             print(f"⚠️  Métodos não encontrados no NeoPZ (whitelist global): {metodos_fmt}")
+        if resultado["classes_legado"]:
+            dicas = [
+                f"{c} → prefira {renames[c]}" if c in renames else c
+                for c in resultado["classes_legado"]
+            ]
+            print(f"⚠️  API antiga ({'/'.join(DIRS_LEGADO)}) usada: {', '.join(dicas)}")
+            print("   Essas classes existem, mas são do legado — prefira a API atual do NeoPZ")
         if (not resultado["alucinacoes"] and not resultado["includes"]
                 and not resultado["includes_por_classe"] and not resultado["metodos_suspeitos"]):
             print("✅ Nomes verificados: classes, headers e métodos existem no NeoPZ")
@@ -1060,6 +1132,9 @@ def main():
         fontes_curtas = [Path(f).name for f in resultado["fontes"]]
         print(f"📄 Fontes ({resultado['tentativas']} tentativa(s)): {', '.join(fontes_curtas)}")
         print("-" * 50 + "\n")
+
+        # Log JSONL — dataset futuro de avaliação/fine-tuning
+        _registrar_interacao(pergunta, resultado)
 
 
 if __name__ == "__main__":

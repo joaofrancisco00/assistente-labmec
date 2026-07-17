@@ -237,6 +237,17 @@ def _extract_simple_tpz_declarations(content: str, filepath: Path) -> list:
 
 # ── API pública ────────────────────────────────────────────────────────────────
 
+# Diretórios do NeoPZ que contêm a API ANTIGA (pré-refatoração de materiais)
+# ou código de benchmark. Compartilhado entre indexer (exclui do retrieval) e
+# pipeline (segundo nível da whitelist: existir ali não é alucinação, mas gera
+# aviso "prefira a API atual").
+DIRS_LEGADO = ("needrefactor", "PerfTests")
+
+
+def _eh_legado(filepath: Path) -> bool:
+    return any(d in filepath.parts for d in DIRS_LEGADO)
+
+
 def extract_classes_from_header(filepath: Path) -> list:
     """
     Extrai todas as declarações TPZxxx de um arquivo .h — classes, structs,
@@ -302,22 +313,37 @@ def extract_classes_from_header(filepath: Path) -> list:
     return chunks
 
 
+def build_tiered_class_whitelist(base_path: Path) -> tuple:
+    """
+    Varre todos os .h e retorna (todas, apenas_legado):
+      - todas: todos os nomes TPZ reais — a validação continua permissiva
+        (classe do legado EXISTE, não é alucinação);
+      - apenas_legado: classes cujas declarações estão TODAS em DIRS_LEGADO —
+        segundo nível da whitelist, usado pelo pipeline para avisar "prefira
+        a API atual" sem bloquear nem forçar retry. Uma classe declarada nos
+        dois lugares (ex: forward declaration num header legado) NÃO entra
+        aqui — na dúvida, menos aviso é o lado seguro.
+    """
+    atuais, legado = set(), set()
+    for h_file in base_path.rglob("*.h"):
+        try:
+            content = h_file.read_text(encoding='utf-8', errors='replace')
+        except Exception:
+            continue
+        found = set(re.findall(r'\b(?:class|struct)\s+(TPZ\w+)', content))
+        found.update(_find_extra_tpz_declarations(content))
+        destino = legado if _eh_legado(h_file) else atuais
+        destino.update(found)
+    return atuais | legado, legado - atuais
+
+
 def build_class_whitelist(base_path: Path) -> set:
     """
     Varre todos os .h e retorna o conjunto de nomes TPZ reais — classes,
     structs, namespaces (ex: TPZGeoMeshTools), aliases `using`/`typedef` e
     enums. Usado pelo indexer para criar a whitelist de validação.
     """
-    classes = set()
-    for h_file in base_path.rglob("*.h"):
-        try:
-            content = h_file.read_text(encoding='utf-8', errors='replace')
-            found = re.findall(r'\b(?:class|struct)\s+(TPZ\w+)', content)
-            classes.update(found)
-            classes.update(_find_extra_tpz_declarations(content))
-        except Exception:
-            pass
-    return classes
+    return build_tiered_class_whitelist(base_path)[0]
 
 
 def build_header_whitelist(base_path: Path) -> set:

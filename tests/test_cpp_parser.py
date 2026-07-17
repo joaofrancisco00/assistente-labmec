@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cpp_parser import (
     build_class_whitelist,
+    build_tiered_class_whitelist,
     extract_classes_from_header,
     find_suspicious_method_calls,
 )
@@ -87,6 +88,29 @@ enum TPZCores { ECor1, ECor2 };
         for esperado in ("TPZReal", "TPZForward", "TPZTools",
                          "TPZAlias", "TPZVelho", "TPZCores"):
             self.assertIn(esperado, nomes)
+
+
+class TestWhitelistDoisNiveis(unittest.TestCase):
+    def test_classe_so_do_legado_e_separada(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "Material").mkdir()
+            (base / "Material" / "novo.h").write_text(
+                "class TPZMatPoisson { public: void Contribute(); };\n"
+                "class TPZCompartilhada;\n", encoding="utf-8")
+            legado = base / "Material" / "needrefactor"
+            legado.mkdir()
+            (legado / "velho.h").write_text(
+                "class TPZMatVelha { public: void Foo(); };\n"
+                "class TPZCompartilhada { public: void Bar(); };\n", encoding="utf-8")
+            todas, apenas_legado = build_tiered_class_whitelist(base)
+
+        # Classe do legado EXISTE (não pode virar falso positivo de alucinação)
+        self.assertIn("TPZMatVelha", todas)
+        self.assertIn("TPZMatPoisson", todas)
+        # Só quem vive EXCLUSIVAMENTE no legado entra no segundo nível;
+        # quem aparece nos dois lados fica de fora (menos aviso = lado seguro)
+        self.assertEqual(apenas_legado, {"TPZMatVelha"})
 
 
 class TestChamadasSuspeitas(unittest.TestCase):

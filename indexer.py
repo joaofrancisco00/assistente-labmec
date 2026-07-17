@@ -29,8 +29,9 @@ except ImportError:
 import json
 
 from cpp_parser import (
+    DIRS_LEGADO,
     extract_classes_from_header,
-    build_class_whitelist,
+    build_tiered_class_whitelist,
     build_header_whitelist,
     build_method_whitelist_from_chunks,
     build_class_methods_index_from_chunks,
@@ -40,6 +41,7 @@ from cpp_parser import (
 BASE_DIR               = Path("./base_de_dados")   # pasta com .h e .cpp do NeoPZ
 INDEX_DIR              = Path("./banco_chroma")
 WHITELIST_FILE          = INDEX_DIR / "whitelist.txt"
+LEGACY_CLASSES_FILE     = INDEX_DIR / "legacy_classes.txt"
 HEADERS_WHITELIST_FILE  = INDEX_DIR / "headers_whitelist.txt"
 METHODS_WHITELIST_FILE  = INDEX_DIR / "methods_whitelist.txt"
 CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
@@ -110,8 +112,16 @@ def _indexar_headers(embeddings, chunks_por_arquivo: dict):
 
     print(f"  {len(chunks_por_arquivo)} arquivos .h encontrados")
     documents = []
+    pulados_legado = 0
 
     for h_file, chunks in tqdm(chunks_por_arquivo.items(), desc="  Montando documentos"):
+        # API antiga fora do RETRIEVAL (o modelo não deve aprender com ela
+        # pelo contexto) — as whitelists continuam incluindo essas classes,
+        # então usá-las não vira falso positivo de alucinação, só aviso.
+        if any(d in Path(h_file).parts for d in DIRS_LEGADO):
+            pulados_legado += 1
+            continue
+
         if not chunks:
             # Header sem classes TPZ — indexa como bloco genérico
             try:
@@ -136,6 +146,8 @@ def _indexar_headers(embeddings, chunks_por_arquivo: dict):
                 }
             ))
 
+    if pulados_legado:
+        print(f"  {pulados_legado} headers de {'/'.join(DIRS_LEGADO)} excluídos do retrieval")
     print(f"  {len(documents)} chunks gerados a partir dos headers")
 
     if not documents:
@@ -158,12 +170,15 @@ def _indexar_exemplos(embeddings):
     """
     print("\n💡 Indexando exemplos (.cpp)...")
 
-    cpp_files = list(BASE_DIR.rglob("*.cpp"))
+    todos_cpp = list(BASE_DIR.rglob("*.cpp"))
+    # Mesma regra dos headers: exemplos da API antiga fora do retrieval
+    cpp_files = [f for f in todos_cpp if not any(d in f.parts for d in DIRS_LEGADO)]
     if not cpp_files:
         print("  ⚠️  Nenhum .cpp encontrado.")
         return
 
-    print(f"  {len(cpp_files)} arquivos .cpp encontrados")
+    print(f"  {len(cpp_files)} arquivos .cpp encontrados"
+          f" ({len(todos_cpp) - len(cpp_files)} do legado excluídos)")
 
     # Separadores que fazem sentido em C++ (evita cortar dentro de funções)
     splitter = RecursiveCharacterTextSplitter(
@@ -225,8 +240,9 @@ def _gerar_whitelist(chunks_por_arquivo: dict):
 
     todos_chunks = [c for chunks in chunks_por_arquivo.values() for c in chunks]
 
-    # 1. Whitelist de classes
-    classes = build_class_whitelist(BASE_DIR)
+    # 1. Whitelist de classes — dois níveis: todas (validação permissiva) +
+    #    as que SÓ existem no legado (aviso "prefira a API atual" no pipeline)
+    classes, classes_legado = build_tiered_class_whitelist(BASE_DIR)
     if not classes:
         print("  ⚠️  Whitelist de classes vazia. Verifique os .h em base_de_dados/")
     else:
@@ -234,6 +250,9 @@ def _gerar_whitelist(chunks_por_arquivo: dict):
         sample = sorted(classes)[:6]
         print(f"  ✅ {len(classes)} classes salvas em whitelist.txt")
         print(f"     Exemplos: {', '.join(sample)}...")
+        LEGACY_CLASSES_FILE.write_text('\n'.join(sorted(classes_legado)), encoding='utf-8')
+        print(f"  ✅ {len(classes_legado)} classes só do legado ({'/'.join(DIRS_LEGADO)}) "
+              f"em legacy_classes.txt")
 
     # 2. Whitelist de headers
     headers = build_header_whitelist(BASE_DIR)
