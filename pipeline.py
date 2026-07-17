@@ -22,6 +22,15 @@ from cpp_parser import find_tpz_classes_in_code, find_suspicious_method_calls
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 OLLAMA_MODEL           = "qwen2.5-coder:7b"
+
+# Janela de contexto pedida ao Ollama. SEM isso, o servidor usa o default dele
+# (2048–4096 tokens dependendo da versão) e TRUNCA o prompt em silêncio — com
+# 4 headers (~2500 chars) + 4 exemplos (~2000) + 3 páginas inteiras de wiki, o
+# prompt passa fácil de 4096 tokens, e parte das regras/do contexto recuperado
+# pode nem chegar ao modelo (o que explica em parte ele "ignorar" instruções
+# de correção). qwen2.5-coder suporta 32k; 16k dá folga sem estourar memória.
+NUM_CTX                = 16384
+
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 INDEX_DIR              = Path("./banco_chroma")
 WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
@@ -66,6 +75,12 @@ K_WIKI       = 3                   # chunks da wiki a recuperar por consulta
 # Headers "chute" que o modelo inventa e que NÃO existem no projeto — removidos
 # automaticamente na correção pós-geração (ver _corrigir_includes_automaticamente).
 INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
+
+# Headers da biblioteca padrão C que terminam em .h — NUNCA validar contra a
+# whitelist do NeoPZ (ver _validar_includes: <math.h> era marcado como "header
+# não encontrado" e disparava retries à toa).
+HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",
+                   "time.h", "float.h", "limits.h", "ctype.h", "stddef.h"}
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -188,20 +203,55 @@ def _boost_por_classe(docs: list, classes_citadas: set, metadata_key: str) -> li
     return boost + resto
 
 
+def _dedup_docs(docs: list) -> list:
+    """Remove documentos duplicados preservando a ordem (chave = conteúdo)."""
+    vistos, unicos = set(), []
+    for doc in docs:
+        if doc.page_content not in vistos:
+            vistos.add(doc.page_content)
+            unicos.append(doc)
+    return unicos
+
+
+def _buscar_declaracoes_por_classe(headers_db, pergunta: str, classes: set, limite: int) -> list:
+    """
+    Busca DETERMINÍSTICA por metadata: para cada classe, recupera o chunk de
+    declaração dela via filtro exato (metadata `classe` == nome), independente
+    de a busca semântica trazer ou não. O _boost_por_classe só REORDENA o pool
+    que o MMR retornou — se a declaração da classe citada não veio no pool, o
+    boost não faz nada; este fetch garante que ela entra no contexto.
+    """
+    docs = []
+    for classe in sorted(classes)[:limite]:
+        try:
+            hits = headers_db.similarity_search(pergunta, k=1, filter={"classe": classe})
+        except Exception:
+            hits = []
+        docs.extend(hits)
+    return docs
+
+
 def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None) -> tuple:
     """
     Busca nas coleções com MMR (pool ampliado) e depois reordena (boost)
     priorizando chunks cuja classe bate com alguma classe TPZ citada na
-    pergunta. Se wiki_db estiver disponível, inclui documentação curada.
+    pergunta. Para classes citadas EXPLICITAMENTE, a declaração é buscada de
+    forma garantida via filtro de metadata (não depende do pool do MMR).
+    Se wiki_db estiver disponível, inclui documentação curada.
     Retorna (h_docs, e_docs, w_docs, fontes).
     """
     classes_citadas = find_tpz_classes_in_code(pergunta)
+
+    # Fetch garantido das declarações das classes citadas na pergunta
+    garantidos = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_citadas, limite=K_HEADERS)
 
     pool_headers = max(K_HEADERS * EXAMPLE_POOL_MULT, K_HEADERS)
     h_pool = headers_db.max_marginal_relevance_search(
         pergunta, k=pool_headers, fetch_k=pool_headers * 2
     )
-    h_docs = _boost_por_classe(h_pool, classes_citadas, "classe")[:K_HEADERS]
+    h_docs = _dedup_docs(
+        garantidos + _boost_por_classe(h_pool, classes_citadas, "classe")
+    )[:K_HEADERS]
 
     pool_examples = max(K_EXAMPLES * EXAMPLE_POOL_MULT, K_EXAMPLES)
     e_pool = examples_db.max_marginal_relevance_search(
@@ -254,6 +304,24 @@ def _formatar_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> str:
     return "\n\n---\n\n".join(partes)
 
 
+def _classes_do_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> set:
+    """
+    Classes TPZ presentes nos chunks recuperados — usadas na lista de
+    referência do prompt. São as classes relevantes para ESTA pergunta, ao
+    contrário do antigo sorted(whitelist)[:50], que devolvia sempre as mesmas
+    50 primeiras em ordem alfabética (quase nunca ligadas à pergunta).
+    """
+    classes = set()
+    for doc in h_docs or []:
+        c = doc.metadata.get("classe", "") or ""
+        if c:
+            classes.add(c)
+    for doc in (e_docs or []) + (w_docs or []):
+        valor = doc.metadata.get("classes_usadas", "") or ""
+        classes.update(x.strip() for x in valor.split(",") if x.strip())
+    return classes
+
+
 # ── Sugestões de correção (difflib) ──────────────────────────────────────────────
 
 def _sugerir_correcoes(alucinadas: list, whitelist: set, cutoff: float = 0.6) -> dict:
@@ -277,12 +345,17 @@ def _montar_prompt(
     includes_por_classe: dict = None,
     metodos_suspeitos: list = None,
     methods_whitelist: set = None,
+    classes_contexto: set = None,
 ) -> str:
     """
     Monta o prompt completo como string.
     Se houver classes alucinadas ou includes errados, adiciona instrução de correção.
     """
-    classes_reais = ", ".join(sorted(whitelist)[:50]) if whitelist else "—"
+    # Lista de referência: classes presentes no contexto recuperado (relevantes
+    # para esta pergunta). Cai para a whitelist global só se o contexto não
+    # tiver nenhuma classe identificada.
+    referencia = classes_contexto or whitelist
+    classes_reais = ", ".join(sorted(referencia)[:40]) if referencia else "—"
 
     instrucao_correcao = ""
 
@@ -365,7 +438,7 @@ Para CADA classe, inclua o header específico. Exemplos:
   TPZCompMesh       → #include "pzcmesh.h"
   TPZLinearAnalysis → #include "TPZLinearAnalysis.h"
 
-Classes TPZ que existem no projeto (lista parcial para referência):
+Classes TPZ reais relacionadas a esta tarefa (todas existem no NeoPZ):
 {classes_reais}
 {instrucao_correcao}
 
@@ -418,22 +491,37 @@ def _validar_codigo(codigo: str, whitelist: set) -> list:
     return [c for c in usadas if c not in whitelist]
 
 
-def _extrair_includes(codigo: str) -> list:
-    """Extrai nomes de headers .h incluídos no código (ex: 'NeoPZ.h')."""
-    achados = re.findall(r'#include\s*[<"]([^>"]+\.h)[>"]', codigo)
-    return [Path(inc).name for inc in achados]
+_INCLUDE_RE       = re.compile(r'#include\s*[<"]([^>"]+\.h)[>"]')
+_INCLUDE_ASPAS_RE = re.compile(r'#include\s*"([^"]+\.h)"')
+
+
+def _extrair_includes(codigo: str, apenas_aspas: bool = False) -> list:
+    """
+    Extrai nomes de headers .h incluídos no código (ex: 'NeoPZ.h').
+
+    apenas_aspas=True limita a #include "..." — usado na VALIDAÇÃO: includes
+    de sistema em <...> (ex: <math.h>) não são do NeoPZ e eram marcados como
+    "header não encontrado", disparando retries à toa. Para checar PRESENÇA
+    de um include (correção automática), as duas formas contam.
+    """
+    regex = _INCLUDE_ASPAS_RE if apenas_aspas else _INCLUDE_RE
+    return [Path(inc).name for inc in regex.findall(codigo)]
 
 
 def _validar_includes(codigo: str, headers_whitelist: set) -> dict:
     """
     Verifica os #include .h contra a whitelist de headers reais.
-    Retorna {include_errado: [sugestões]} — dict vazio = tudo OK.
+    Só valida includes entre aspas — <...> é sistema/externo, não é nosso
+    para validar (ver _extrair_includes). Retorna {include_errado:
+    [sugestões]} — dict vazio = tudo OK.
     """
     if not headers_whitelist:
         return {}
-    usados = _extrair_includes(codigo)
+    usados = _extrair_includes(codigo, apenas_aspas=True)
     problemas = {}
     for inc in usados:
+        if inc in HEADERS_SISTEMA:
+            continue  # stdlib entre aspas (raro, mas compila) — não é alucinação
         if inc not in headers_whitelist:
             problemas[inc] = difflib.get_close_matches(inc, headers_whitelist, n=3, cutoff=0.5)
     return problemas
@@ -673,7 +761,8 @@ def gerar_codigo(
 ) -> dict:
     """
     Executa o pipeline completo:
-    recuperação → formatação → geração → validação → retry se necessário.
+    recuperação (1x) → formatação → geração → correção determinística →
+    validação → retry com contexto reforçado, se necessário.
     """
     class_header_index = class_header_index or {}
     collisions = collisions or {}
@@ -686,11 +775,15 @@ def gerar_codigo(
     metodos_suspeitos = None
     correcoes_automaticas = []
 
-    for tentativa in range(1, MAX_RETRIES + 2):
-        print(f"  [Tentativa {tentativa}] Buscando contexto e gerando resposta...")
+    # 1. Recupera documentos relevantes — FORA do loop: a busca é determinística
+    #    para a mesma pergunta, então repeti-la a cada retry só gastava
+    #    embedding/busca para obter o MESMO resultado. No retry o contexto muda
+    #    de outro jeito: reforço com as declarações das classes sugeridas
+    #    (ver fim do loop).
+    h_docs, e_docs, w_docs, fontes = _recuperar_contexto(pergunta, headers_db, examples_db, wiki_db)
 
-        # 1. Recupera documentos relevantes
-        h_docs, e_docs, w_docs, fontes = _recuperar_contexto(pergunta, headers_db, examples_db, wiki_db)
+    for tentativa in range(1, MAX_RETRIES + 2):
+        print(f"  [Tentativa {tentativa}] Gerando resposta...")
 
         # 2. Formata o contexto
         contexto = _formatar_contexto(h_docs, e_docs, w_docs)
@@ -700,7 +793,12 @@ def gerar_codigo(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
             classes_alucinadas, includes_errados, includes_por_classe,
             metodos_suspeitos, methods_whitelist,
+            classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
         )
+
+        tokens_estimados = len(prompt) // 4  # ~4 chars/token p/ código + PT misto
+        if tokens_estimados > int(NUM_CTX * 0.9):
+            print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
         # 4. Chama o modelo
         resposta = llm.invoke(prompt)
@@ -775,7 +873,26 @@ def gerar_codigo(
             print("  ⚠️  Limite de tentativas atingido.")
             break
 
-        print("  ↩️  Corrigindo automaticamente na próxima tentativa...")
+        # Reforço de contexto para o retry: até aqui o modelo era mandado usar
+        # o nome sugerido (ex: "use TPZGeoMeshTools") sem nunca VER a
+        # declaração da classe sugerida — a API certa podia não estar no
+        # contexto. Busca os chunks das classes sugeridas/envolvidas e injeta
+        # nos headers do contexto da próxima tentativa.
+        classes_reforco = set()
+        for c in classes_alucinadas or []:
+            classes_reforco.update(difflib.get_close_matches(c, whitelist, n=2, cutoff=0.6))
+        for cls, _metodo in metodos_suspeitos or []:
+            classes_reforco.add(cls)
+        classes_reforco -= {d.metadata.get("classe", "") for d in h_docs}
+        if classes_reforco:
+            extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)
+            if extras:
+                h_docs = _dedup_docs(h_docs + extras)
+                fontes |= {d.metadata.get("source", "?") for d in extras}
+                nomes = ", ".join(sorted({d.metadata.get("classe", "?") for d in extras}))
+                print(f"  📚 Contexto reforçado com declarações de: {nomes}")
+
+        print("  ↩️  Corrigindo na próxima tentativa...")
 
     return {
         "resposta":             resposta,
@@ -808,7 +925,7 @@ def main():
     methods_whitelist  = _carregar_methods_whitelist()
     class_methods_index = _carregar_class_methods_index()
     system_base        = _carregar_system_prompt()
-    llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE)
+    llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
 
     print("\n" + "=" * 50)
     print("  🤖 Assistente LabMeC Pronto!")
@@ -840,7 +957,7 @@ def main():
 
         # Status de validação
         if resultado["correcoes_automaticas"]:
-            print(f"🔧 Headers corrigidos automaticamente: {', '.join(resultado['correcoes_automaticas'])}")
+            print(f"🔧 Correções automáticas (classes/métodos/headers): {', '.join(resultado['correcoes_automaticas'])}")
         if resultado["alucinacoes"]:
             print(f"⚠️  Classes não verificadas: {', '.join(resultado['alucinacoes'])}")
         if resultado["includes"]:

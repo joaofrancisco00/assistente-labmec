@@ -6,6 +6,8 @@ Diferenças em relação ao indexer anterior:
   ✅ Agora: .h com parser inteligente + .cpp maiores, 2 coleções separadas
             + whitelist de classes reais para validação
             + whitelist de headers reais para validação de #include
+            + reindexação limpa (remove coleção antiga — sem duplicatas)
+            + parse único dos headers (whitelists e índices derivados dele)
 """
 import re
 from pathlib import Path
@@ -30,8 +32,8 @@ from cpp_parser import (
     extract_classes_from_header,
     build_class_whitelist,
     build_header_whitelist,
-    build_method_whitelist,
-    build_class_methods_index,
+    build_method_whitelist_from_chunks,
+    build_class_methods_index_from_chunks,
 )
 
 # ── Configurações ──────────────────────────────────────────────────────────────
@@ -62,26 +64,54 @@ def _carregar_embeddings():
     )
 
 
-def _indexar_headers(embeddings):
+def _limpar_colecao(nome: str):
+    """
+    Remove a coleção antiga antes de reindexar — Chroma.from_documents
+    ACRESCENTA à coleção existente, então rodar o indexer duas vezes sem isso
+    duplicava todos os chunks (e o MMR passava a gastar slots do pool com
+    cópias idênticas). Mesma proteção que o indexer_wiki.py já tinha.
+    """
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=str(INDEX_DIR))
+        if nome in [c.name for c in client.list_collections()]:
+            client.delete_collection(nome)
+            print(f"  Coleção antiga '{nome}' removida (reindexação limpa)")
+    except Exception:
+        pass  # ChromaDB mais antigo sem list_collections — segue sem limpar
+
+
+def _parsear_headers() -> dict:
+    """
+    Parseia todos os .h UMA vez e retorna {arquivo: [ClassChunk]}. Antes, o
+    parse completo rodava 3x (whitelist de métodos, índice classe→métodos e a
+    indexação em si), triplicando o tempo da etapa mais cara à toa.
+    """
+    h_files = list(BASE_DIR.rglob("*.h"))
+    if not h_files:
+        return {}
+    print(f"\n🔎 Parseando {len(h_files)} headers (passada única)...")
+    return {h: extract_classes_from_header(h)
+            for h in tqdm(h_files, desc="  Extraindo classes")}
+
+
+def _indexar_headers(embeddings, chunks_por_arquivo: dict):
     """
     Indexa arquivos .h com parser C++ inteligente.
-    Cada chunk = uma declaração de classe completa.
+    Cada chunk = uma declaração de classe completa (já parseada em _parsear_headers).
     """
     print("\n📋 Indexando headers (.h)...")
 
-    h_files = list(BASE_DIR.rglob("*.h"))
-    if not h_files:
+    if not chunks_por_arquivo:
         print("  ⚠️  Nenhum .h encontrado!")
         print("  Os headers são ESSENCIAIS — contêm os nomes de classe reais.")
         print("  Adicione os arquivos .h do repositório neopz em base_de_dados/")
         return
 
-    print(f"  {len(h_files)} arquivos .h encontrados")
+    print(f"  {len(chunks_por_arquivo)} arquivos .h encontrados")
     documents = []
 
-    for h_file in tqdm(h_files, desc="  Parseando classes"):
-        chunks = extract_classes_from_header(h_file)
-
+    for h_file, chunks in tqdm(chunks_por_arquivo.items(), desc="  Montando documentos"):
         if not chunks:
             # Header sem classes TPZ — indexa como bloco genérico
             try:
@@ -111,6 +141,7 @@ def _indexar_headers(embeddings):
     if not documents:
         return
 
+    _limpar_colecao(COL_HEADERS)
     Chroma.from_documents(
         documents=documents,
         embedding=embeddings,
@@ -165,6 +196,7 @@ def _indexar_exemplos(embeddings):
     if not documents:
         return
 
+    _limpar_colecao(COL_EXAMPLES)
     Chroma.from_documents(
         documents=documents,
         embedding=embeddings,
@@ -174,18 +206,24 @@ def _indexar_exemplos(embeddings):
     print(f"  ✅ Salvo na coleção '{COL_EXAMPLES}'")
 
 
-def _gerar_whitelist():
+def _gerar_whitelist(chunks_por_arquivo: dict):
     """
-    Varre todos os .h e salva:
+    Salva os artefatos de validação:
       - whitelist.txt          → nomes TPZ reais (classe/struct/namespace/using/typedef/enum)
       - headers_whitelist.txt  → nomes de headers .h reais
       - methods_whitelist.txt  → nomes de método/função reais (whitelist GLOBAL,
-                                  não por classe — ver cpp_parser.build_method_whitelist)
+                                  não por classe — ver cpp_parser)
+    Métodos e índice classe→métodos são derivados de chunks_por_arquivo (parse
+    único). Classes/headers continuam com varredura própria — é regex barata e
+    de propósito mais permissiva que o parser de chunks (pega forward
+    declarations, que o parser pula por não terem corpo).
     Esses arquivos são usados pelo pipeline para detectar alucinações.
     """
     print("\n🔍 Gerando whitelists (classes + headers + métodos)...")
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+    todos_chunks = [c for chunks in chunks_por_arquivo.values() for c in chunks]
 
     # 1. Whitelist de classes
     classes = build_class_whitelist(BASE_DIR)
@@ -208,7 +246,7 @@ def _gerar_whitelist():
         print(f"     Exemplos: {', '.join(sample)}...")
 
     # 3. Whitelist de métodos (global — não por classe, ver docstring do módulo)
-    methods = build_method_whitelist(BASE_DIR)
+    methods = build_method_whitelist_from_chunks(todos_chunks)
     if not methods:
         print("  ⚠️  Whitelist de métodos vazia.")
     else:
@@ -219,7 +257,7 @@ def _gerar_whitelist():
 
     # 4. Índice classe -> métodos (usado só na CORREÇÃO automática de método,
     #    não na detecção — ver cpp_parser.build_class_methods_index)
-    class_methods = build_class_methods_index(BASE_DIR)
+    class_methods = build_class_methods_index_from_chunks(todos_chunks)
     if not class_methods:
         print("  ⚠️  Índice classe→métodos vazio.")
     else:
@@ -241,9 +279,10 @@ def main():
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
-    _gerar_whitelist()
+    chunks_por_arquivo = _parsear_headers()
+    _gerar_whitelist(chunks_por_arquivo)
     embeddings = _carregar_embeddings()
-    _indexar_headers(embeddings)
+    _indexar_headers(embeddings, chunks_por_arquivo)
     _indexar_exemplos(embeddings)
 
     print("\n" + "=" * 55)

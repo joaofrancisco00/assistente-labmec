@@ -102,9 +102,15 @@ _METHOD_BLACKLIST = {'if', 'while', 'for', 'switch', 'return', 'else', 'do',
 # verdade aqui: `SetExact(std::function<void (...)> f, int pOrder=1)` ficava
 # invisível à whitelist com o regex antigo, e SetExact é usado no tutorial
 # mais básico do NeoPZ — teria virado outro falso positivo de alucinação.
+#
+# O separador antes do nome é [\s*&]+ (não \s+): no estilo dominante do NeoPZ
+# o asterisco/& fica COLADO no nome (`TPZGeoMesh *CreateGeoMeshOnGrid(...)`,
+# `TPZFMatrix<STATE> &Solution()`), e com \s+ essas declarações não casavam —
+# métodos reais (e comuns) ficavam fora da whitelist e viravam falso positivo
+# de alucinação, mesmo problema do SetExact acima.
 _METHOD_NAME_START_RE = re.compile(
     r'(?:virtual\s+|static\s+|explicit\s+|inline\s+)*'
-    r'[\w:<>*&\s,~]+\s+(~?[a-zA-Z]\w*)\s*\(',
+    r'[\w:<>*&\s,~]+[\s*&]+(~?[a-zA-Z]\w*)\s*\(',
     re.MULTILINE
 )
 
@@ -349,6 +355,18 @@ def find_tpz_classes_in_code(code: str) -> set:
 # esse risco.
 
 
+def build_method_whitelist_from_chunks(chunks) -> set:
+    """
+    Deriva a whitelist global de métodos de ClassChunks já parseados — permite
+    ao indexer parsear os .h UMA vez e derivar whitelist + índice do mesmo
+    resultado, em vez de reparsear tudo para cada artefato.
+    """
+    methods = set()
+    for chunk in chunks:
+        methods.update(chunk.methods)
+    return methods
+
+
 def build_method_whitelist(base_path: Path) -> set:
     """
     Varre todos os .h e retorna o conjunto de nomes de método/função
@@ -358,8 +376,7 @@ def build_method_whitelist(base_path: Path) -> set:
     """
     methods = set()
     for h_file in base_path.rglob("*.h"):
-        for chunk in extract_classes_from_header(h_file):
-            methods.update(chunk.methods)
+        methods |= build_method_whitelist_from_chunks(extract_classes_from_header(h_file))
     return methods
 
 
@@ -386,15 +403,22 @@ def build_class_methods_index(base_path: Path) -> dict:
     candidato bom o bastante, a chamada some sem substituição, e continua
     marcada como suspeita para revisão/instrução no prompt.
     """
+    chunks = [c for h_file in base_path.rglob("*.h")
+              for c in extract_classes_from_header(h_file)]
+    return build_class_methods_index_from_chunks(chunks)
+
+
+def build_class_methods_index_from_chunks(chunks) -> dict:
+    """Versão de build_class_methods_index para ClassChunks já parseados
+    (mesma motivação de build_method_whitelist_from_chunks)."""
     index: dict = {}
-    for h_file in base_path.rglob("*.h"):
-        for chunk in extract_classes_from_header(h_file):
-            if not chunk.methods:
-                continue
-            existentes = index.setdefault(chunk.class_name, [])
-            for m in chunk.methods:
-                if m not in existentes:
-                    existentes.append(m)
+    for chunk in chunks:
+        if not chunk.methods:
+            continue
+        existentes = index.setdefault(chunk.class_name, [])
+        for m in chunk.methods:
+            if m not in existentes:
+                existentes.append(m)
     return index
 
 
