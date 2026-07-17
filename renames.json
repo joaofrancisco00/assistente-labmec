@@ -1,0 +1,5 @@
+{
+  "_comentario": "Mapa curado {classe_antiga: classe_atual} de renomeacoes conhecidas entre versoes do NeoPZ (ex: refatoracao de materiais). O modelo decorou a API antiga no treino — este mapa converte o erro mais previsivel em correcao deterministica, antes de qualquer difflib. Edite a mao para adicionar novas entradas; chaves comecando com '_' sao ignoradas. A correcao so e aplicada se a classe nova existir na whitelist.",
+  "TPZMatLaplacian": "TPZMatPoisson",
+  "TPZMatElasticity2D": "TPZElasticity2D"
+}

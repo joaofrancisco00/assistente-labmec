@@ -78,6 +78,56 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         self.assertTrue(correcoes)
 
 
+class TestRenomeacoes(unittest.TestCase):
+    def test_renomeacao_conhecida_vence_o_difflib(self):
+        # Regressão: difflib empurrou 'TPZMatLaplacian' (Poisson) para
+        # 'TPZMatPlaca2' (material de placa) por semelhança de string.
+        # Com o mapa curado, a renomeação vai direto para o destino certo.
+        codigo = "TPZMatLaplacian *mat = new TPZMatLaplacian(1, 2);"
+        whitelist = {"TPZMatPoisson", "TPZMatPlaca2", "TPZMat2dLin"}
+        renames = {"TPZMatLaplacian": "TPZMatPoisson"}
+        corrigido, correcoes = pipeline._corrigir_classes_automaticamente(
+            codigo, whitelist, renames)
+        self.assertIn("TPZMatPoisson", corrigido)
+        self.assertNotIn("TPZMatLaplacian", corrigido)
+        self.assertEqual(correcoes, ["TPZMatLaplacian → TPZMatPoisson [renomeação]"])
+
+    def test_destino_fora_da_whitelist_nao_aplica(self):
+        # Trava de segurança: entrada desatualizada no renames.json não pode
+        # introduzir uma classe que não existe
+        codigo = "TPZMatLaplacian *mat;"
+        corrigido, correcoes = pipeline._corrigir_classes_automaticamente(
+            codigo, {"TPZGeoMesh"}, {"TPZMatLaplacian": "TPZClasseQueNaoExiste"})
+        self.assertIn("TPZMatLaplacian", corrigido)
+        self.assertEqual(correcoes, [])
+
+    def test_arquivo_renames_do_projeto_e_valido(self):
+        # O renames.json versionado deve carregar e apontar só para classes
+        # que existem na whitelist real
+        renames = pipeline._carregar_renames()
+        self.assertIn("TPZMatLaplacian", renames)
+        whitelist = set(
+            Path("banco_chroma/whitelist.txt").read_text(encoding="utf-8").splitlines())
+        for antiga, nova in renames.items():
+            self.assertNotIn(antiga, whitelist,
+                             f"'{antiga}' ainda existe — entrada desnecessária")
+            self.assertIn(nova, whitelist,
+                          f"'{nova}' não existe na whitelist — entrada inválida")
+
+
+class TestDespriorizacaoDeLegado(unittest.TestCase):
+    def test_legado_vai_para_o_fim(self):
+        from langchain_core.documents import Document
+        docs = [
+            Document(page_content="a", metadata={"source": "Material/needrefactor/REAL/mixedpoisson.h"}),
+            Document(page_content="b", metadata={"source": "Material/Poisson/TPZMatPoisson.h"}),
+            Document(page_content="c", metadata={"source": "PerfTests/progs/hybridmesh/pzhybridpoisson.h"}),
+            Document(page_content="d", metadata={"source": "Mesh/pzcmesh.h"}),
+        ]
+        ordenados = pipeline._despriorizar_legado(docs)
+        self.assertEqual([d.page_content for d in ordenados], ["b", "d", "a", "c"])
+
+
 class TestDeteccaoDeCodigo(unittest.TestCase):
     def test_prosa_nao_e_codigo(self):
         prosa = ("A classe TPZGeoMesh representa a malha geométrica do NeoPZ. "

@@ -60,6 +60,14 @@ CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
 HEADER_INDEX_DIR        = Path("./header_index")
 CLASS_HEADER_INDEX_FILE  = HEADER_INDEX_DIR / "class_header_index.json"
 COLLISIONS_FILE          = HEADER_INDEX_DIR / "collisions.json"
+
+# Mapa CURADO {classe_antiga: classe_atual} de renomeações conhecidas entre
+# versões do NeoPZ (ex: TPZMatLaplacian → TPZMatPoisson na refatoração de
+# materiais). O modelo decorou a API antiga no treino — é o erro mais
+# previsível que existe, e o difflib não resolve: sugere por semelhança de
+# STRING (já empurrou 'TPZMatLaplacian' para 'TPZMatPlaca2', material de
+# placa, num problema de Poisson). Arquivo editável à mão; ver _carregar_renames.
+RENAMES_FILE            = Path("./renames.json")
 TEMPERATURE            = 0.1
 MAX_RETRIES            = 2          # tentativas extras ao detectar alucinação
 K_HEADERS              = 4          # chunks de declaração de classe a recuperar
@@ -133,6 +141,21 @@ def _carregar_class_header_index() -> dict:
     return dados
 
 
+def _carregar_renames() -> dict:
+    """
+    Carrega o mapa curado de renomeações (ver comentário em RENAMES_FILE).
+    Chaves começando com '_' são ignoradas (servem de comentário no JSON).
+    Arquivo opcional — sem ele o pipeline segue só com difflib.
+    """
+    if not RENAMES_FILE.exists():
+        return {}
+    dados = json.loads(RENAMES_FILE.read_text(encoding='utf-8'))
+    renames = {k: v for k, v in dados.items() if not k.startswith("_")}
+    if renames:
+        print(f"  Renomeações conhecidas: {len(renames)} mapeadas")
+    return renames
+
+
 def _carregar_collisions() -> dict:
     """Carrega classes com mais de um header válido (não corrigir automaticamente)."""
     if not COLLISIONS_FILE.exists():
@@ -203,6 +226,23 @@ def _boost_por_classe(docs: list, classes_citadas: set, metadata_key: str) -> li
     return boost + resto
 
 
+# Diretórios do NeoPZ que contêm a API ANTIGA (pré-refatoração) ou código de
+# benchmark — o modelo já tende à API velha pelo treino; o retrieval não
+# precisa reforçar isso trazendo justamente esses chunks primeiro.
+_DIRS_LEGADO = ("needrefactor", "PerfTests")
+
+
+def _despriorizar_legado(docs: list) -> list:
+    """Reordenação estável: empurra para o fim do pool os chunks vindos de
+    _DIRS_LEGADO. Eles continuam disponíveis (podem ser a única fonte de uma
+    classe), só perdem a prioridade para a API atual."""
+    atuais, legado = [], []
+    for doc in docs:
+        src = doc.metadata.get("source", "") or ""
+        (legado if any(d in src for d in _DIRS_LEGADO) else atuais).append(doc)
+    return atuais + legado
+
+
 def _dedup_docs(docs: list) -> list:
     """Remove documentos duplicados preservando a ordem (chave = conteúdo)."""
     vistos, unicos = set(), []
@@ -250,14 +290,14 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None) ->
         pergunta, k=pool_headers, fetch_k=pool_headers * 2
     )
     h_docs = _dedup_docs(
-        garantidos + _boost_por_classe(h_pool, classes_citadas, "classe")
+        garantidos + _boost_por_classe(_despriorizar_legado(h_pool), classes_citadas, "classe")
     )[:K_HEADERS]
 
     pool_examples = max(K_EXAMPLES * EXAMPLE_POOL_MULT, K_EXAMPLES)
     e_pool = examples_db.max_marginal_relevance_search(
         pergunta, k=pool_examples, fetch_k=pool_examples * 2
     )
-    e_docs = _boost_por_classe(e_pool, classes_citadas, "classes_usadas")[:K_EXAMPLES]
+    e_docs = _boost_por_classe(_despriorizar_legado(e_pool), classes_citadas, "classes_usadas")[:K_EXAMPLES]
 
     # Wiki — documentação curada (API real, conceitos, bugs conhecidos)
     w_docs = []
@@ -346,6 +386,7 @@ def _montar_prompt(
     metodos_suspeitos: list = None,
     methods_whitelist: set = None,
     classes_contexto: set = None,
+    renames: dict = None,
 ) -> str:
     """
     Monta o prompt completo como string.
@@ -361,10 +402,15 @@ def _montar_prompt(
 
     # Correção de classes
     if classes_alucinadas:
+        renames = renames or {}
         sugestoes = _sugerir_correcoes(classes_alucinadas, whitelist)
         linhas = []
         for classe, matches in sugestoes.items():
-            if matches:
+            if classe in renames and renames[classe] in whitelist:
+                linhas.append(
+                    f"  - '{classe}' foi RENOMEADA no NeoPZ atual. Use '{renames[classe]}' no lugar."
+                )
+            elif matches:
                 linhas.append(f"  - '{classe}' não existe. Você quis dizer: {', '.join(matches)}?")
             else:
                 linhas.append(f"  - '{classe}' não existe e não há classe parecida.")
@@ -585,7 +631,7 @@ CUTOFF_CLASSE_AUTOMATICA = 0.80
 CUTOFF_METODO_AUTOMATICO = 0.78
 
 
-def _corrigir_classes_automaticamente(codigo: str, whitelist: set) -> tuple:
+def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict = None) -> tuple:
     """
     Correção determinística de nomes de classe TPZ "quase certos" — mesmo
     princípio de _corrigir_includes_automaticamente, mas para o nome da
@@ -618,15 +664,27 @@ def _corrigir_classes_automaticamente(codigo: str, whitelist: set) -> tuple:
     if not alucinadas:
         return codigo, []
 
+    renames = renames or {}
     correcoes = []
     for errada in alucinadas:
-        candidatos = difflib.get_close_matches(errada, whitelist, n=1, cutoff=CUTOFF_CLASSE_AUTOMATICA)
-        if not candidatos:
-            continue
-        certa = candidatos[0]
+        # 1º o mapa curado de renomeações (determinístico, confiança máxima) —
+        # difflib sugere por STRING e já empurrou 'TPZMatLaplacian' para
+        # 'TPZMatPlaca2' (material de placa!) num problema de Poisson, quando
+        # o certo era 'TPZMatPoisson' (string-distante, semanticamente certo).
+        # Trava de segurança: só aplica se o destino existir na whitelist
+        # (protege contra typo/entrada desatualizada no renames.json).
+        if errada in renames and renames[errada] in whitelist:
+            certa = renames[errada]
+            sufixo = " [renomeação]"
+        else:
+            candidatos = difflib.get_close_matches(errada, whitelist, n=1, cutoff=CUTOFF_CLASSE_AUTOMATICA)
+            if not candidatos:
+                continue
+            certa = candidatos[0]
+            sufixo = ""
         codigo, n = re.subn(r'\b' + re.escape(errada) + r'\b', certa, codigo)
         if n:
-            correcoes.append(f"{errada} → {certa}")
+            correcoes.append(f"{errada} → {certa}{sufixo}")
     return codigo, correcoes
 
 
@@ -758,6 +816,7 @@ def gerar_codigo(
     wiki_db=None,
     methods_whitelist: set = None,
     class_methods_index: dict = None,
+    renames: dict = None,
 ) -> dict:
     """
     Executa o pipeline completo:
@@ -768,6 +827,7 @@ def gerar_codigo(
     collisions = collisions or {}
     methods_whitelist = methods_whitelist or set()
     class_methods_index = class_methods_index or {}
+    renames = renames or {}
 
     classes_alucinadas = None
     includes_errados = None
@@ -794,6 +854,7 @@ def gerar_codigo(
             classes_alucinadas, includes_errados, includes_por_classe,
             metodos_suspeitos, methods_whitelist,
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
+            renames=renames,
         )
 
         tokens_estimados = len(prompt) // 4  # ~4 chars/token p/ código + PT misto
@@ -818,7 +879,7 @@ def gerar_codigo(
         tem_codigo = _resposta_contem_codigo(resposta)
         correcoes_automaticas = []
         if tem_codigo:
-            resposta, correcoes_classes = _corrigir_classes_automaticamente(resposta, whitelist)
+            resposta, correcoes_classes = _corrigir_classes_automaticamente(resposta, whitelist, renames)
             correcoes_automaticas.extend(correcoes_classes)
 
             metodos_suspeitos_pre_correcao = _validar_metodos(resposta, methods_whitelist, whitelist)
@@ -847,7 +908,8 @@ def gerar_codigo(
             metodos_suspeitos = []
 
         if not classes_alucinadas and not includes_errados and not includes_por_classe and not metodos_suspeitos:
-            print("  ✅ Validação OK — classes, headers e métodos existem e estão corretos no NeoPZ!")
+            print("  ✅ Nomes verificados — classes, headers e métodos existem no NeoPZ "
+                  "(semântica e assinaturas não são checadas)")
             return {
                 "resposta":             resposta,
                 "valido":               True,
@@ -879,18 +941,37 @@ def gerar_codigo(
         # contexto. Busca os chunks das classes sugeridas/envolvidas e injeta
         # nos headers do contexto da próxima tentativa.
         classes_reforco = set()
+        docs_semanticos = []
         for c in classes_alucinadas or []:
+            # Renomeação conhecida tem prioridade (destino certo, determinístico)
+            if c in renames and renames[c] in whitelist:
+                classes_reforco.add(renames[c])
             classes_reforco.update(difflib.get_close_matches(c, whitelist, n=2, cutoff=0.6))
+            # Busca SEMÂNTICA além da string: o nome alucinado + a pergunta
+            # descrevem o CONCEITO que o modelo procurava. difflib sozinho já
+            # empurrou 'TPZMatLaplacian' (Poisson) para 'TPZMatPlaca2'
+            # (material de placa!) só porque as strings parecem — a busca por
+            # embedding de "TPZMatLaplacian <pergunta sobre Poisson>" traz
+            # TPZMatPoisson/TPZDarcyFlow, que são string-distantes mas certos.
+            try:
+                docs_semanticos.extend(headers_db.similarity_search(f"{c} {pergunta}", k=2))
+            except Exception:
+                pass
         for cls, _metodo in metodos_suspeitos or []:
             classes_reforco.add(cls)
         classes_reforco -= {d.metadata.get("classe", "") for d in h_docs}
-        if classes_reforco:
-            extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)
-            if extras:
-                h_docs = _dedup_docs(h_docs + extras)
-                fontes |= {d.metadata.get("source", "?") for d in extras}
-                nomes = ", ".join(sorted({d.metadata.get("classe", "?") for d in extras}))
-                print(f"  📚 Contexto reforçado com declarações de: {nomes}")
+
+        extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)
+        extras = _despriorizar_legado(_dedup_docs(extras + docs_semanticos))
+        ja_presentes = {d.page_content for d in h_docs}
+        extras = [d for d in extras if d.page_content not in ja_presentes]
+        if extras:
+            h_docs = _dedup_docs(h_docs + extras)
+            fontes |= {d.metadata.get("source", "?") for d in extras}
+            nomes = ", ".join(sorted(
+                {d.metadata.get("classe") or Path(d.metadata.get("source", "?")).name for d in extras}
+            ))
+            print(f"  📚 Contexto reforçado com declarações de: {nomes}")
 
         print("  ↩️  Corrigindo na próxima tentativa...")
 
@@ -924,6 +1005,7 @@ def main():
     collisions         = _carregar_collisions()
     methods_whitelist  = _carregar_methods_whitelist()
     class_methods_index = _carregar_class_methods_index()
+    renames            = _carregar_renames()
     system_base        = _carregar_system_prompt()
     llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
 
@@ -949,6 +1031,7 @@ def main():
             whitelist, headers_whitelist, system_base,
             class_header_index, collisions, wiki_db,
             methods_whitelist, class_methods_index,
+            renames,
         )
 
         print("\nAssistente LabMeC:\n")
@@ -970,7 +1053,8 @@ def main():
             print(f"⚠️  Métodos não encontrados no NeoPZ (whitelist global): {metodos_fmt}")
         if (not resultado["alucinacoes"] and not resultado["includes"]
                 and not resultado["includes_por_classe"] and not resultado["metodos_suspeitos"]):
-            print("✅ Resposta validada — classes, headers e métodos existem e estão corretos no NeoPZ")
+            print("✅ Nomes verificados: classes, headers e métodos existem no NeoPZ")
+            print("   (semântica e assinaturas NÃO são checadas — confira se o material/método é o adequado ao problema)")
 
         # Fontes usadas
         fontes_curtas = [Path(f).name for f in resultado["fontes"]]
