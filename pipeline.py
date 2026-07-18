@@ -267,6 +267,29 @@ def _despriorizar_legado(docs: list) -> list:
     return atuais + legado
 
 
+_PERGUNTA_EXPLICATIVA_RE = re.compile(
+    r'\b(o que (é|e|faz|são|sao)|para que serve|explique|explica|como funciona|'
+    r'qual (a |é a |e a )?diferen[çc]a)\b', re.IGNORECASE)
+_PEDIDO_DE_CODIGO_RE = re.compile(
+    r'\b(c[óo]digo|programa|escreva|implemente|crie|criar|gere|gerar|resolva|resolver|'
+    r'monte|montar|exemplo completo)\b', re.IGNORECASE)
+
+
+def _pergunta_e_explicativa(pergunta: str) -> bool:
+    """
+    Heurística: a pergunta pede EXPLICAÇÃO (e não código)?
+    Usada para excluir as receitas (doc_fluxo — programas completos) do
+    retrieval nessas perguntas: o modelo 7b tende a colar a receita INTEIRA
+    como "exemplo de uso" mesmo quando irrelevante (aconteceu de verdade: a
+    explicação de TPZInt1d veio com a receita do Poisson inteira, que não usa
+    a classe em linha nenhuma). Instrução no prompt não bastou — o filtro
+    determinístico no retrieval corta o problema na origem: sem programa
+    completo no contexto, não há o que colar.
+    """
+    return (bool(_PERGUNTA_EXPLICATIVA_RE.search(pergunta))
+            and not _PEDIDO_DE_CODIGO_RE.search(pergunta))
+
+
 def _dedup_docs(docs: list) -> list:
     """Remove documentos duplicados preservando a ordem (chave = conteúdo)."""
     vistos, unicos = set(), []
@@ -295,7 +318,8 @@ def _buscar_declaracoes_por_classe(headers_db, pergunta: str, classes: set, limi
     return docs
 
 
-def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None) -> tuple:
+def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
+                        explicativa: bool = None) -> tuple:
     """
     Busca nas coleções com MMR (pool ampliado) e depois reordena (boost)
     priorizando chunks cuja classe bate com alguma classe TPZ citada na
@@ -326,9 +350,15 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None) ->
     # Wiki — documentação curada (API real, conceitos, bugs conhecidos)
     w_docs = []
     if wiki_db is not None:
+        if explicativa is None:
+            explicativa = _pergunta_e_explicativa(pergunta)
         w_pool = wiki_db.max_marginal_relevance_search(
             pergunta, k=K_WIKI * EXAMPLE_POOL_MULT, fetch_k=K_WIKI * EXAMPLE_POOL_MULT * 2
         )
+        if explicativa:
+            # Pergunta explicativa: receitas fora do contexto (ver
+            # _pergunta_e_explicativa) — conceitos/código da wiki continuam
+            w_pool = [d for d in w_pool if d.metadata.get("tipo") != "doc_fluxo"]
         w_docs = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")[:K_WIKI]
 
     all_docs = h_docs + e_docs + w_docs
@@ -543,8 +573,10 @@ INSTRUÇÕES:
 - Sempre inclua os #include específicos necessários
 - Siga os padrões dos exemplos de uso
 - Se não tiver certeza do nome exato, escreva: // TODO: verificar nome
-- Se o usuário pedir uma explicação, responda com texto didático
-- Se o usuário pedir código, gere com explicações do que cada parte faz
+- Se o usuário pedir uma EXPLICAÇÃO (ex: "o que é a classe X"), responda com
+  texto didático; código só se for um trecho CURTO usando a própria classe
+  explicada. NUNCA cole um programa completo de outro assunto como "exemplo"
+- Se o usuário pedir código/programa, gere com explicações do que cada parte faz
 - Combine texto explicativo e código quando fizer sentido
 
 {contexto}{_formatar_historico(historico)}
@@ -968,7 +1000,12 @@ def gerar_codigo(
     consulta = pergunta
     if historico:
         consulta = f"{historico[-1][0]}\n{pergunta}"
-    h_docs, e_docs, w_docs, fontes = _recuperar_contexto(consulta, headers_db, examples_db, wiki_db)
+    # A heurística explicativa avalia a pergunta ATUAL (não a consulta
+    # expandida — o histórico poderia contaminar a classificação)
+    h_docs, e_docs, w_docs, fontes = _recuperar_contexto(
+        consulta, headers_db, examples_db, wiki_db,
+        explicativa=_pergunta_e_explicativa(pergunta),
+    )
 
     for tentativa in range(1, MAX_RETRIES + 2):
         print(f"  [Tentativa {tentativa}] Gerando resposta...")

@@ -12,8 +12,11 @@ Notas de operação:
   - Sem autenticação — pensado para a rede interna do laboratório.
   - Cada interação vai para logs/interacoes.jsonl (mesmo log do CLI).
 """
+import datetime
+import json
 import queue
 import threading
+from pathlib import Path
 
 import gradio as gr
 
@@ -80,11 +83,39 @@ def _rodape(resultado: dict) -> str:
                  for c in resultado["classes_legado"]]
         linhas.append("⚠️ **API antiga usada**: " + ", ".join(dicas))
 
-    from pathlib import Path
     fontes = ", ".join(sorted(Path(f).name for f in resultado["fontes"]))
     linhas.append(f"📄 **Fontes** ({resultado['tentativas']} tentativa(s)): {fontes}")
 
     return "\n\n---\n" + "\n\n".join(linhas)
+
+
+# ── Feedback 👍/👎 ─────────────────────────────────────────────────────────────
+
+FEEDBACK_FILE = Path("./logs/feedback.jsonl")
+
+
+def _registrar_feedback(data: gr.LikeData):
+    """
+    Voto do usuário numa resposta → logs/feedback.jsonl. É o sinal que
+    nenhuma whitelist captura: resposta '✅ validada' porém errada na física
+    aparece aqui como 👎. A correlação com logs/interacoes.jsonl é feita
+    offline pelo conteúdo da resposta.
+    """
+    try:
+        FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        conteudo = data.value
+        if isinstance(conteudo, dict):  # formatos novos do Gradio
+            conteudo = conteudo.get("value", str(conteudo))
+        registro = {
+            "quando":   datetime.datetime.now().isoformat(timespec="seconds"),
+            "gostou":   bool(data.liked),
+            "resposta": str(conteudo)[:4000],
+        }
+        with FEEDBACK_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+        print(f"  {'👍' if data.liked else '👎'} feedback registrado")
+    except Exception as e:
+        print(f"  (feedback falhou: {e})")
 
 
 # ── Função de chat (generator: streaming na interface) ─────────────────────────
@@ -173,6 +204,16 @@ demo = gr.ChatInterface(
         "O que é a classe TPZGeoMesh e para que ela serve?",
     ],
 )
+
+# Habilita os botões 👍/👎 nas respostas (o listener .like faz o Gradio
+# exibi-los). Precisa ser anexado DENTRO do contexto do Blocks (Gradio 6).
+# Protegido: se a API mudar numa versão futura, o app sobe sem feedback em
+# vez de quebrar.
+try:
+    with demo:
+        demo.chatbot.like(_registrar_feedback)
+except Exception as _e:
+    print(f"⚠️  Botões de feedback indisponíveis nesta versão do Gradio: {_e}")
 
 if __name__ == "__main__":
     demo.queue(default_concurrency_limit=1).launch(server_name="0.0.0.0", server_port=7860)

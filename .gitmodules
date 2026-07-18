@@ -1,0 +1,3 @@
+[submodule "base_de_dados/neopz"]
+	path = base_de_dados/neopz
+	url = https://github.com/labmec/neopz.git

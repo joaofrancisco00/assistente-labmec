@@ -43,6 +43,12 @@ if ! ollama list | grep -q "qwen2.5-coder:7b"; then
 fi
 echo "✅ Ollama OK (qwen2.5-coder:7b disponível)"
 
+# ── Submodule do NeoPZ ────────────────────────────────────────────────────────
+if [ -f .gitmodules ] && [ ! -f base_de_dados/neopz/CMakeLists.txt ]; then
+    echo "→ Baixando o código do NeoPZ (submodule, ~210 MB, só na primeira vez)..."
+    git submodule update --init
+fi
+
 # ── Índice vetorial ───────────────────────────────────────────────────────────
 if [ -f banco_chroma/whitelist.txt ]; then
     echo "✅ Índice (banco_chroma/) encontrado — nada a reindexar"

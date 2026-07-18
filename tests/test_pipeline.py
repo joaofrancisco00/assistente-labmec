@@ -198,6 +198,22 @@ class TestLogDeInteracoes(unittest.TestCase):
             pipeline._registrar_interacao("pergunta", self.RESULTADO, caminho)  # não levanta
 
 
+class TestPerguntaExplicativa(unittest.TestCase):
+    def test_explicativas(self):
+        for p in ("O que é a classe TPZGeoMesh e para que ela serve?",
+                  "Explique a classe TPZInt1d do NeoPZ",
+                  "como funciona o AutoBuild?",
+                  "qual a diferença entre TPZGeoMesh e TPZCompMesh?"):
+            self.assertTrue(pipeline._pergunta_e_explicativa(p), p)
+
+    def test_pedidos_de_codigo(self):
+        for p in ("Crie uma malha geométrica 2D com TPZGeoMeshTools",
+                  "Escreva um código completo de elasticidade",
+                  "Explique como criar um código de Poisson",   # pede código
+                  "resolva um problema de Darcy misto"):
+            self.assertFalse(pipeline._pergunta_e_explicativa(p), p)
+
+
 class TestHistoricoDeConversa(unittest.TestCase):
     def test_vazio_nao_adiciona_nada(self):
         self.assertEqual(pipeline._formatar_historico([]), "")

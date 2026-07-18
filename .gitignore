@@ -9,8 +9,8 @@ build/
 # Banco vetorial Chroma (regenerável pelo indexer)
 banco_chroma/
 
-# NeoPZ (repositório separado)
-base_de_dados/neopz/
+# NeoPZ agora é um git submodule (base_de_dados/neopz) pinado na revisão
+# validada — clone com: git clone --recursive
 
 # Log de interações (dataset local — cresce a cada conversa)
 logs/

@@ -31,21 +31,21 @@ Pronto — nada precisa ser reindexado.
 
 ### Caminho B — a partir do git (reconstrução)
 
-O repositório **não** versiona duas pastas grandes (ver `.gitignore`):
-
-1. `base_de_dados/neopz/` — snapshot do código-fonte do NeoPZ.
-   **Importante**: as whitelists e receitas foram validadas contra a revisão
-   `4c6b6d277` (mar/2022). Usar outra revisão exige revalidar as receitas
-   (ver seção "Compilando as receitas").
-2. `banco_chroma/` — índice vetorial, regenerável.
+O código-fonte do NeoPZ vem como **git submodule** pinado na revisão validada
+(`4c6b6d277`, a ponta do branch `main` do labmec/neopz). O índice vetorial
+(`banco_chroma/`) não é versionado — é regenerado pelos indexadores.
 
 ```bash
-git clone <repo> && cd assistente-labmec
-# coloque o snapshot do NeoPZ em base_de_dados/neopz/
+git clone --recursive <repo> && cd assistente-labmec
+# (se esqueceu o --recursive: git submodule update --init)
 ./setup.sh
 venv/bin/python indexer.py        # indexa headers/exemplos + whitelists (~min)
 venv/bin/python indexer_wiki.py   # indexa a wiki curada (wiki_neopz/)
 ```
+
+**Importante**: whitelists e receitas foram validadas contra essa revisão.
+Para migrar para outra (ex: `develop`), é preciso reindexar tudo E revalidar
+as receitas compilando contra o NeoPZ novo (ver "Compilando as receitas").
 
 ## Uso
 
@@ -80,7 +80,7 @@ NeoPZ — semântica e assinaturas **não** são checadas; revise antes de usar.
 | `reference_solutions/` | Receitas canônicas + `CMakeLists.txt` de verificação |
 | `header_index/` | Índice determinístico classe → header |
 | `banco_chroma/` | Índice vetorial + whitelists (gerado; fora do git) |
-| `base_de_dados/neopz/` | Snapshot do NeoPZ (fora do git) |
+| `base_de_dados/neopz/` | Código do NeoPZ (submodule pinado em `4c6b6d277`) |
 | `logs/interacoes.jsonl` | Log de cada interação (dataset de avaliação futuro) |
 | `tests/` | Testes de regressão (`python3 -m unittest discover -s tests`) |
 
@@ -91,8 +91,11 @@ NeoPZ — semântica e assinaturas **não** são checadas; revise antes de usar.
   `wiki_neopz/wiki/flows/` e rode `venv/bin/python indexer_wiki.py`.
 - **Renomeação de classe** (API antiga → atual): adicione em `renames.json`
   (só é aplicada se o destino existir na whitelist).
-- **Qual receita escrever em seguida**: veja `logs/interacoes.jsonl` — as
-  perguntas com `"valido": false` ou respostas ruins indicam a demanda real.
+- **Qual receita escrever em seguida**: veja `logs/interacoes.jsonl` e os
+  votos 👎 em `logs/feedback.jsonl` — indicam a demanda real.
+- **Antes e depois de mudar prompt/receitas/índice**: rode
+  `venv/bin/python eval_benchmark.py` (~10 min) — perguntas-benchmark reais
+  com verificação automática; acusa regressão silenciosa.
 
 ## Compilando as receitas (verificação de verdade)
 
