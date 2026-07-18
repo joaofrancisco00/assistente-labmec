@@ -11,7 +11,9 @@
 #include "TPZGeoMeshTools.h"    // TPZGeoMeshTools::CreateGeoMeshOnGrid
 #include "MMeshType.h"          // MMeshType::ETriangular
 #include "pzcmesh.h"            // TPZCompMesh
-#include "TPZMatPoisson.h"      // TPZMatPoisson<STATE> (API atual, Material/Poisson)
+#include "Poisson/TPZMatPoisson.h"  // TPZMatPoisson<STATE> (API atual — o
+                                    // include precisa do prefixo da família:
+                                    // só "TPZMatPoisson.h" NÃO compila)
 #include "TPZLinearAnalysis.h"  // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"    // TPZSkylineStructMatrix
 #include "pzstepsolver.h"       // TPZStepSolver

@@ -15,6 +15,9 @@ base_de_dados/neopz/
 # Log de interações (dataset local — cresce a cada conversa)
 logs/
 
+# Build das soluções de referência (regenerável via CMake)
+reference_solutions/build/
+
 # Sistema / editor
 .DS_Store
 .vscode/

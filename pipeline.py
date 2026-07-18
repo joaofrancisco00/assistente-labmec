@@ -368,6 +368,28 @@ def _formatar_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> str:
     return "\n\n---\n\n".join(partes)
 
 
+def _formatar_historico(historico: list, max_trocas: int = 3, max_chars_resposta: int = 1200) -> str:
+    """
+    Renderiza as últimas trocas da conversa para dar contexto a follow-ups
+    ("e como eu refino essa malha?"). Respostas longas são truncadas: o que
+    o follow-up precisa é do ASSUNTO discutido, não do código inteiro — e o
+    orçamento de contexto (NUM_CTX) tem que sobrar para o RAG.
+    `historico` é uma lista de pares (pergunta, resposta).
+    """
+    if not historico:
+        return ""
+    partes = []
+    for pergunta_ant, resposta_ant in historico[-max_trocas:]:
+        resposta_ant = resposta_ant or ""
+        if len(resposta_ant) > max_chars_resposta:
+            resposta_ant = resposta_ant[:max_chars_resposta] + "\n[... resposta truncada ...]"
+        partes.append(f"Aluno: {pergunta_ant}\nAssistente: {resposta_ant}")
+    return (
+        "\n\nHISTÓRICO DA CONVERSA (só contexto — a tarefa atual está no fim):\n"
+        + "\n---\n".join(partes)
+    )
+
+
 def _classes_do_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> set:
     """
     Classes TPZ presentes nos chunks recuperados — usadas na lista de
@@ -411,6 +433,7 @@ def _montar_prompt(
     methods_whitelist: set = None,
     classes_contexto: set = None,
     renames: dict = None,
+    historico: list = None,
 ) -> str:
     """
     Monta o prompt completo como string.
@@ -524,7 +547,7 @@ INSTRUÇÕES:
 - Se o usuário pedir código, gere com explicações do que cada parte faz
 - Combine texto explicativo e código quando fizer sentido
 
-{contexto}
+{contexto}{_formatar_historico(historico)}
 
 Tarefa: {pergunta}
 
@@ -599,6 +622,24 @@ def _validar_includes(codigo: str, headers_whitelist: set) -> dict:
     return problemas
 
 
+def _include_para_header(caminho: str) -> str:
+    """
+    Forma COMPILÁVEL do #include para um header do índice classe→header.
+
+    Descoberto ao compilar as receitas contra o NeoPZ instalado: o NeoPZ
+    propaga como include path só os diretórios de topo (Mesh/, Pre/,
+    Material/, ...). Para headers da API nova de materiais, que ficam em
+    subpastas (Material/Poisson/TPZMatPoisson.h), o include precisa do
+    prefixo da família — '#include "TPZMatPoisson.h"' (só o basename) NÃO
+    compila; o certo é '#include "Poisson/TPZMatPoisson.h"'. Para os demais
+    diretórios (sem subpasta instalada), o basename continua correto.
+    """
+    partes = Path(caminho).parts
+    if len(partes) >= 3 and partes[0] == "Material":
+        return "/".join(partes[1:])
+    return Path(caminho).name
+
+
 def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisions: dict) -> dict:
     """
     Verificação mais forte que _validar_includes(): para cada classe TPZ usada no
@@ -625,9 +666,10 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
         caminho = class_header_index.get(classe)
         if not caminho:
             continue  # classe fora do índice (pode ser nova ou não-TPZ)
-        header_real = Path(caminho).name
-        if header_real not in includes_atuais:
-            faltando[classe] = header_real
+        # Presença checada pelo BASENAME (o aluno pode ter escrito a forma
+        # qualificada ou não); a forma sugerida é a compilável
+        if Path(caminho).name not in includes_atuais:
+            faltando[classe] = _include_para_header(caminho)
     return faltando
 
 
@@ -780,8 +822,10 @@ def _corrigir_includes_automaticamente(
         return codigo, []
 
     usadas = find_tpz_classes_in_code(codigo)
+    # classe -> caminho completo do índice (a forma compilável do include é
+    # derivada por _include_para_header; presença é checada pelo basename)
     necessarios = {
-        classe: Path(class_header_index[classe]).name
+        classe: class_header_index[classe]
         for classe in usadas
         if classe not in collisions and class_header_index.get(classe)
     }
@@ -810,20 +854,23 @@ def _corrigir_includes_automaticamente(
         return "\n".join(linhas), []
 
     atuais = _includes_atuais(linhas)
-    faltando = {c: h for c, h in necessarios.items() if h not in atuais}
+    faltando = {c: caminho for c, caminho in necessarios.items()
+                if Path(caminho).name not in atuais}
     if not faltando:
         return "\n".join(linhas), []
 
     posicoes_include = [i for i, l in enumerate(linhas) if re.match(r'\s*#include\b', l)]
     ultimo_include_idx = max(posicoes_include, default=-1)
 
-    novas = [f'#include "{h}"' for h in sorted(set(faltando.values()))]
+    novas = [f'#include "{_include_para_header(caminho)}"'
+             for caminho in sorted({str(c) for c in faltando.values()})]
     if ultimo_include_idx >= 0:
         linhas = linhas[:ultimo_include_idx + 1] + novas + linhas[ultimo_include_idx + 1:]
     else:
         linhas = novas + linhas
 
-    correcoes = [f'{c}: + #include "{h}"' for c, h in faltando.items()]
+    correcoes = [f'{c}: + #include "{_include_para_header(caminho)}"'
+                 for c, caminho in faltando.items()]
     return "\n".join(linhas), correcoes
 
 
@@ -856,6 +903,17 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
         print(f"  (log de interações falhou: {e})")
 
 
+def _emitir(on_evento, tipo: str, texto: str):
+    """Notifica a interface (web) sobre progresso — tipos: 'tentativa',
+    'token', 'status'. Nunca deve derrubar o pipeline."""
+    if on_evento is None:
+        return
+    try:
+        on_evento(tipo, texto)
+    except Exception:
+        pass
+
+
 # ── Pipeline principal ─────────────────────────────────────────────────────────
 
 def gerar_codigo(
@@ -873,11 +931,18 @@ def gerar_codigo(
     class_methods_index: dict = None,
     renames: dict = None,
     legacy_classes: set = None,
+    historico: list = None,
+    on_evento=None,
 ) -> dict:
     """
     Executa o pipeline completo:
     recuperação (1x) → formatação → geração → correção determinística →
     validação → retry com contexto reforçado, se necessário.
+
+    historico: pares (pergunta, resposta) das trocas anteriores — dá contexto
+    a follow-ups no prompt e na recuperação.
+    on_evento: callback opcional (tipo, texto) para a interface web mostrar
+    progresso/streaming — tipos: 'tentativa', 'token', 'status'.
     """
     class_header_index = class_header_index or {}
     collisions = collisions or {}
@@ -897,10 +962,17 @@ def gerar_codigo(
     #    embedding/busca para obter o MESMO resultado. No retry o contexto muda
     #    de outro jeito: reforço com as declarações das classes sugeridas
     #    (ver fim do loop).
-    h_docs, e_docs, w_docs, fontes = _recuperar_contexto(pergunta, headers_db, examples_db, wiki_db)
+    #    Follow-ups ("e como refino essa malha?") não carregam termos
+    #    suficientes sozinhos — a consulta de retrieval é expandida com a
+    #    pergunta anterior (só a consulta; a TAREFA no prompt é a atual).
+    consulta = pergunta
+    if historico:
+        consulta = f"{historico[-1][0]}\n{pergunta}"
+    h_docs, e_docs, w_docs, fontes = _recuperar_contexto(consulta, headers_db, examples_db, wiki_db)
 
     for tentativa in range(1, MAX_RETRIES + 2):
         print(f"  [Tentativa {tentativa}] Gerando resposta...")
+        _emitir(on_evento, "tentativa", str(tentativa))
 
         # 2. Formata o contexto
         contexto = _formatar_contexto(h_docs, e_docs, w_docs)
@@ -912,14 +984,24 @@ def gerar_codigo(
             metodos_suspeitos, methods_whitelist,
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
             renames=renames,
+            historico=historico,
         )
 
         tokens_estimados = len(prompt) // 4  # ~4 chars/token p/ código + PT misto
         if tokens_estimados > int(NUM_CTX * 0.9):
             print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
-        # 4. Chama o modelo
-        resposta = llm.invoke(prompt)
+        # 4. Chama o modelo — em streaming quando possível, para a interface
+        #    mostrar os tokens saindo (num 7b local a resposta leva dezenas de
+        #    segundos; sem feedback o usuário acha que travou)
+        try:
+            pedacos = []
+            for pedaco in llm.stream(prompt):
+                pedacos.append(pedaco)
+                _emitir(on_evento, "token", pedaco)
+            resposta = "".join(pedacos)
+        except (AttributeError, NotImplementedError):
+            resposta = llm.invoke(prompt)
 
         # 4.5 Correção determinística pós-geração — não depende do LLM obedecer
         #     a instrução de correção no prompt (na prática ele não obedece de
@@ -952,6 +1034,7 @@ def gerar_codigo(
 
             if correcoes_automaticas:
                 print(f"  🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
+                _emitir(on_evento, "status", f"🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
 
         # 5. Valida classes (sempre) E includes/métodos (só quando há código de fato)
         classes_alucinadas = _validar_codigo(resposta, whitelist)
@@ -1036,6 +1119,7 @@ def gerar_codigo(
             ))
             print(f"  📚 Contexto reforçado com declarações de: {nomes}")
 
+        _emitir(on_evento, "status", "↩️ Problemas de validação detectados — corrigindo e gerando de novo...")
         print("  ↩️  Corrigindo na próxima tentativa...")
 
     return {
@@ -1079,6 +1163,8 @@ def main():
     print("  Digite 'sair' para encerrar.")
     print("=" * 50 + "\n")
 
+    historico = []  # pares (pergunta, resposta) — memória de conversa
+
     while True:
         pergunta = input("Você: ").strip()
 
@@ -1097,7 +1183,11 @@ def main():
             class_header_index, collisions, wiki_db,
             methods_whitelist, class_methods_index,
             renames, legacy_classes,
+            historico=historico,
         )
+
+        historico.append((pergunta, resultado["resposta"]))
+        del historico[:-6]  # só as últimas trocas interessam (e o prompt corta em 3)
 
         print("\nAssistente LabMeC:\n")
         print(resultado["resposta"])

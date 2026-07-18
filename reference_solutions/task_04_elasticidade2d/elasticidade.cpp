@@ -13,13 +13,16 @@
 #include "TPZGeoMeshTools.h"      // TPZGeoMeshTools::CreateGeoMeshOnGrid
 #include "MMeshType.h"            // MMeshType::ETriangular
 #include "pzcmesh.h"              // TPZCompMesh
-#include "TPZElasticity2D.h"      // TPZElasticity2D (API atual, Material/Elasticity)
+#include "Elasticity/TPZElasticity2D.h"  // TPZElasticity2D (API atual — o
+                                         // include precisa do prefixo da
+                                         // família Elasticity/)
 #include "TPZLinearAnalysis.h"    // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"      // TPZSkylineStructMatrix
 #include "pzstepsolver.h"         // TPZStepSolver
 #include "pzmanvector.h"          // TPZManVector
 #include "pzfmatrix.h"            // TPZFMatrix
 #include "pzvec.h"                // TPZVec
+#include <iostream>
 
 int main() {
     // ── 1. Malha geométrica (mesma receita do Poisson 2D) ────────────────
@@ -46,14 +49,18 @@ int main() {
     cmesh->SetAllCreateFunctionsContinuous();  // H1 contínuo (deslocamentos)
 
     // ── 3. Material: TPZElasticity2D (no heap — a malha assume a posse) ──
-    // Construtor real: (id, E, nu, fx, fy, planestress)
-    //   E  = módulo de Young        nu = coeficiente de Poisson
-    //   fx, fy = força de corpo     planestress: 1 = tensão plana,
-    //                                            0 = deformação plana
+    // ATENÇÃO — bug do NeoPZ (revisão mar/2022): o construtor "completo"
+    // TPZElasticity2D(id, E, nu, fx, fy, planestress) tem o corpo VAZIO no
+    // .cpp — não seta nem o id (fica -666), o AutoBuild não cria nenhum
+    // elemento do domínio e o resultado sai vazio SEM nenhum erro.
+    // Descoberto EXECUTANDO esta receita. Caminho seguro: construtor (id)
+    // + setters.
     constexpr STATE E{1000.}, nu{0.3};
     constexpr STATE fx{0.}, fy{-1.};  // peso próprio para baixo
-    auto *mat = new TPZElasticity2D(matIdDominio, E, nu, fx, fy,
-                                    /*planestress=*/1);
+    auto *mat = new TPZElasticity2D(matIdDominio);
+    mat->SetElasticity(E, nu);   // módulo de Young + coeficiente de Poisson
+    mat->SetBodyForce(fx, fy);   // força de corpo
+    mat->SetPlaneStress();       // ou SetPlaneStrain() p/ deformação plana
     cmesh->InsertMaterialObject(mat);
 
     // ── 4. Contorno: engaste (Dirichlet homogêneo, tipo 0) ───────────────
@@ -66,6 +73,8 @@ int main() {
 
     // ── 5. Construir a malha ─────────────────────────────────────────────
     cmesh->AutoBuild();
+    std::cout << "Elementos: " << cmesh->NElements()
+              << " | Equações: " << cmesh->NEquations() << std::endl;
 
     // ── 6. Montar e resolver ─────────────────────────────────────────────
     TPZLinearAnalysis an(cmesh);

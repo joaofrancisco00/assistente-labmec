@@ -1,20 +1,35 @@
 # Receita completa: elasticidade linear 2D com a API atual do NeoPZ
 
 Fluxo canônico para elasticidade linear 2D (estado plano de tensão ou
-deformação) com Dirichlet, usando a **API atual**. Cada chamada foi conferida
-contra os headers reais do NeoPZ. O esqueleto (malha → cmesh → material →
-contorno → AutoBuild → Assemble → Solve) é o mesmo da receita do Poisson 2D —
-o que muda é o material e tudo que decorre de a solução ser vetorial.
+deformação) com Dirichlet, usando a **API atual**. Este código foi
+**compilado e executado com sucesso** contra o NeoPZ real. O esqueleto
+(malha → cmesh → material → contorno → AutoBuild → Assemble → Solve) é o
+mesmo da receita do Poisson 2D — o que muda é o material e tudo que decorre
+de a solução ser vetorial.
 
 ## Escolha do material — o erro mais comum
 
-- **2D → `TPZElasticity2D`** (`Material/Elasticity/TPZElasticity2D.h`)
+- **2D → `TPZElasticity2D`** (include `"Elasticity/TPZElasticity2D.h"` —
+  com o prefixo da família; só o basename não compila)
 - **3D → `TPZElasticity3D`** — NÃO usar em problemas 2D; além da física
   errada, o construtor é diferente: `TPZElasticity3D(id, E, nu, TPZVec<STATE> &force)`.
-- Construtor real do 2D: `TPZElasticity2D(int id, STATE E, STATE nu, STATE fx, STATE fy, int planestress = 1)`
-  — `E` = módulo de Young, `nu` = Poisson, `fx`/`fy` = força de corpo,
-  `planestress`: `1` = tensão plana, `0` = deformação plana.
-  Alternativa: `TPZElasticity2D(id)` + `SetElasticity(E, nu)`.
+
+## Como configurar o material — ATENÇÃO, bug real do NeoPZ
+
+O construtor "completo" `TPZElasticity2D(id, E, nu, fx, fy, planestress)`
+**tem o corpo vazio** nesta revisão do NeoPZ (mar/2022): não seta nem o id
+(fica -666), o `AutoBuild` não cria nenhum elemento do domínio e o programa
+roda "com sucesso" produzindo resultado **vazio**, sem nenhuma mensagem de
+erro. Descoberto executando esta receita.
+
+O caminho seguro é o construtor `(id)` + setters:
+
+```cpp
+auto *mat = new TPZElasticity2D(matIdDominio);
+mat->SetElasticity(E, nu);   // módulo de Young + coeficiente de Poisson
+mat->SetBodyForce(fx, fy);   // força de corpo
+mat->SetPlaneStress();       // ou SetPlaneStrain() p/ deformação plana
+```
 
 ## Diferenças em relação ao Poisson escalar
 
@@ -25,7 +40,7 @@ o que muda é o material e tudo que decorre de a solução ser vetorial.
    `"Displacement"` (vetor), `"SigmaX"`, `"SigmaY"`, `"TauXY"`,
    `"PrincipalStress1"`, `"PrincipalStress2"`, `"MaxStress"`.
    `"Solution"`/`"Derivative"` são do Poisson e **não existem** aqui.
-3. **Força de corpo** entra no construtor (`fx`, `fy`) — não precisa de
+3. **Força de corpo** via `SetBodyForce(fx, fy)` — não precisa de
    `SetForcingFunction` para carga constante.
 
 ## Código completo (compilável)
@@ -35,7 +50,7 @@ o que muda é o material e tudo que decorre de a solução ser vetorial.
 #include "TPZGeoMeshTools.h"      // TPZGeoMeshTools::CreateGeoMeshOnGrid
 #include "MMeshType.h"            // MMeshType::ETriangular
 #include "pzcmesh.h"              // TPZCompMesh
-#include "TPZElasticity2D.h"      // TPZElasticity2D (API atual)
+#include "Elasticity/TPZElasticity2D.h"  // TPZElasticity2D (API atual — prefixo da família!)
 #include "TPZLinearAnalysis.h"    // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"      // TPZSkylineStructMatrix
 #include "pzstepsolver.h"         // TPZStepSolver
@@ -65,9 +80,14 @@ int main() {
     cmesh->SetAllCreateFunctionsContinuous();
 
     // 3. Material 2D (no heap — a malha assume a posse)
+    // NÃO usar o construtor (id, E, nu, fx, fy, planestress): corpo vazio
+    // nesta revisão do NeoPZ (bug) — usar (id) + setters
     constexpr STATE E{1000.}, nu{0.3};
     constexpr STATE fx{0.}, fy{-1.};  // peso próprio
-    auto *mat = new TPZElasticity2D(matIdDominio, E, nu, fx, fy, 1);
+    auto *mat = new TPZElasticity2D(matIdDominio);
+    mat->SetElasticity(E, nu);
+    mat->SetBodyForce(fx, fy);
+    mat->SetPlaneStress();
     cmesh->InsertMaterialObject(mat);
 
     // 4. Engaste em todo o contorno (Dirichlet, tipo 0) — val2 com 2 entradas
@@ -105,8 +125,11 @@ int main() {
 
 - **`TPZElasticity3D` em problema 2D** — classe existe, compila o nome, mas é
   a física errada e o construtor é outro. Em 2D, sempre `TPZElasticity2D`.
-- **`TPZElasticity2D(id, dim)`** — esse construtor NÃO existe; o segundo
-  argumento não é dimensão, ver assinatura real acima.
+- **`TPZElasticity2D(id, dim)`** — esse construtor NÃO existe.
+- **`TPZElasticity2D(id, E, nu, fx, fy, planestress)`** — existe mas tem o
+  corpo VAZIO nesta revisão (bug do NeoPZ): id fica -666, malha sai vazia,
+  sem erro nenhum. Usar `(id)` + `SetElasticity`/`SetBodyForce`/`SetPlaneStress`.
+- **`#include "TPZElasticity2D.h"` sem o prefixo `Elasticity/`** — não compila.
 - **`val2` com 1 entrada** no `CreateBC` — elasticidade 2D tem 2 variáveis de
   estado; `val2 = {0., 0.}`.
 - **`"Solution"`/`"Derivative"` no `DefineGraphMesh`** — são nomes do Poisson;

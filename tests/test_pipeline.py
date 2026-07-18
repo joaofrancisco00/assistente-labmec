@@ -66,6 +66,30 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         self.assertIn("gmesh->Print()", corrigido)
         self.assertEqual(correcoes, ["TPZGeoMesh::Prnt → TPZGeoMesh::Print"])
 
+    def test_include_qualificado_para_material_da_api_nova(self):
+        # Descoberto compilando as receitas: headers da API nova de materiais
+        # ficam em subpastas (Material/Poisson/...) e o include precisa do
+        # prefixo da família — o basename sozinho NÃO compila
+        self.assertEqual(pipeline._include_para_header("Material/Poisson/TPZMatPoisson.h"),
+                         "Poisson/TPZMatPoisson.h")
+        self.assertEqual(pipeline._include_para_header("Material/DarcyFlow/TPZMixedDarcyFlow.h"),
+                         "DarcyFlow/TPZMixedDarcyFlow.h")
+        # Material raiz e demais diretórios de topo: basename continua certo
+        self.assertEqual(pipeline._include_para_header("Material/TPZNullMaterial.h"),
+                         "TPZNullMaterial.h")
+        self.assertEqual(pipeline._include_para_header("Mesh/pzgmesh.h"), "pzgmesh.h")
+
+    def test_injecao_usa_forma_compilavel(self):
+        codigo = 'int main() { TPZMatPoisson<STATE> *m = new TPZMatPoisson<STATE>(1, 2); }\n'
+        corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
+            codigo,
+            {"TPZMatPoisson": "Material/Poisson/TPZMatPoisson.h"},
+            {},
+            {"TPZMatPoisson.h"},
+        )
+        self.assertIn('#include "Poisson/TPZMatPoisson.h"', corrigido)
+        self.assertNotIn('#include "TPZMatPoisson.h"', corrigido)
+
     def test_include_lixo_removido_e_certo_injetado(self):
         codigo = ('#include "pz.h"\n#include <iostream>\n\n'
                   'int main() { TPZGeoMesh *g = new TPZGeoMesh(); }\n')
@@ -172,6 +196,34 @@ class TestLogDeInteracoes(unittest.TestCase):
             bloqueio.write_text("sou um arquivo, não um diretório")
             caminho = bloqueio / "interacoes.jsonl"
             pipeline._registrar_interacao("pergunta", self.RESULTADO, caminho)  # não levanta
+
+
+class TestHistoricoDeConversa(unittest.TestCase):
+    def test_vazio_nao_adiciona_nada(self):
+        self.assertEqual(pipeline._formatar_historico([]), "")
+        self.assertEqual(pipeline._formatar_historico(None), "")
+
+    def test_limita_trocas_e_trunca_respostas(self):
+        historico = [(f"pergunta {i}", "x" * 5000) for i in range(5)]
+        texto = pipeline._formatar_historico(historico, max_trocas=3, max_chars_resposta=100)
+        # só as 3 últimas trocas entram
+        self.assertNotIn("pergunta 0", texto)
+        self.assertNotIn("pergunta 1", texto)
+        self.assertIn("pergunta 2", texto)
+        self.assertIn("pergunta 4", texto)
+        # respostas longas são truncadas
+        self.assertIn("[... resposta truncada ...]", texto)
+        self.assertNotIn("x" * 200, texto)
+
+    def test_historico_entra_no_prompt(self):
+        prompt = pipeline._montar_prompt(
+            "e como refino essa malha?", "CONTEXTO", "sistema", set(), set(),
+            historico=[("como crio uma malha?", "Use TPZGeoMeshTools.")],
+        )
+        self.assertIn("HISTÓRICO DA CONVERSA", prompt)
+        self.assertIn("como crio uma malha?", prompt)
+        # a tarefa atual continua sendo a pergunta nova
+        self.assertIn("Tarefa: e como refino essa malha?", prompt)
 
 
 class TestDeteccaoDeCodigo(unittest.TestCase):

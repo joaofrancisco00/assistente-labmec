@@ -1,9 +1,15 @@
 # Receita completa: Poisson 2D com a API atual do NeoPZ
 
 Fluxo canônico para resolver `-∇²u = f` num retângulo com condição de
-Dirichlet, usando a **API atual** (pós-refatoração de materiais). Cada
-chamada foi conferida contra os headers reais do NeoPZ. Use este exemplo
-como esqueleto para qualquer problema H1 escalar.
+Dirichlet, usando a **API atual** (pós-refatoração de materiais). Este
+código foi **compilado e executado com sucesso** contra o NeoPZ real
+(reference_solutions/ tem o CMakeLists). Use este exemplo como esqueleto
+para qualquer problema H1 escalar.
+
+**Include de material da API nova leva o prefixo da família**:
+`#include "Poisson/TPZMatPoisson.h"` — só `"TPZMatPoisson.h"` NÃO compila
+(o NeoPZ propaga como include path apenas os diretórios de topo, e os
+materiais novos ficam em subpastas de `Material/`).
 
 ## Passo a passo
 
@@ -12,7 +18,7 @@ como esqueleto para qualquer problema H1 escalar.
    - `nDivs` com tamanho igual a `dim`.
    - `matIds` precisa de `dim*2 + 1` ids quando `createBoundEls=true` (em 2D: 1 do domínio + 4 dos contornos). Passar só um id dá `DebugStop`.
 2. **Malha computacional** — `TPZCompMesh` + `SetDimModel` + `SetDefaultOrder` + `SetAllCreateFunctionsContinuous()` (H1 contínuo).
-3. **Material** — `TPZMatPoisson<STATE>` (header `TPZMatPoisson.h`, pasta `Material/Poisson`). Sempre criado com `new`: a malha assume a posse do ponteiro.
+3. **Material** — `TPZMatPoisson<STATE>` (include `"Poisson/TPZMatPoisson.h"` — com o prefixo da família!). Sempre criado com `new`: a malha assume a posse do ponteiro.
 4. **Termo fonte** — `SetForcingFunction(lambda, pOrder)` com `std::function<void(const TPZVec<REAL>&, TPZVec<STATE>&)>`.
 5. **Condição de contorno** — `mat->CreateBC(mat, matIdContorno, tipo, val1, val2)` e inserir o retorno na malha. Tipos: `0` = Dirichlet, `1` = Neumann, `2` = Robin.
 6. **`cmesh->AutoBuild()`** — sem isso a malha computacional fica vazia.
@@ -26,7 +32,7 @@ como esqueleto para qualquer problema H1 escalar.
 #include "TPZGeoMeshTools.h"    // TPZGeoMeshTools::CreateGeoMeshOnGrid
 #include "MMeshType.h"          // MMeshType::ETriangular
 #include "pzcmesh.h"            // TPZCompMesh
-#include "TPZMatPoisson.h"      // TPZMatPoisson<STATE> (API atual)
+#include "Poisson/TPZMatPoisson.h"  // TPZMatPoisson<STATE> (API atual — prefixo da família!)
 #include "TPZLinearAnalysis.h"  // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"    // TPZSkylineStructMatrix
 #include "pzstepsolver.h"       // TPZStepSolver
@@ -103,3 +109,6 @@ int main() {
 - **Esquecer `AutoBuild()`** — a malha computacional fica vazia e a análise não tem o que montar.
 - **Chamar `Solve()` sem `Assemble()`** — o sistema nunca é montado.
 - **`#include "NeoPZ.h"`** — não existe header único no NeoPZ; cada classe tem o seu.
+- **`#include "TPZMatPoisson.h"` sem o prefixo `Poisson/`** — não compila; os
+  materiais da API nova vivem em subpastas de `Material/` e o include leva o
+  nome da família.

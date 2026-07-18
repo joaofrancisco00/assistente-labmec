@@ -1,8 +1,9 @@
 # Receita completa: Darcy 2D na formulação mista (H(div) + L2) com a API atual do NeoPZ
 
 Fluxo canônico para a equação de Darcy na formulação mista — fluxo e pressão
-como incógnitas simultâneas. Padrão extraído e verificado do código real do
-NeoPZ (`UnitTest_PZ/TestHDivCollapsed`, `TPZMultiphysicsCompMesh.h`).
+como incógnitas simultâneas. Este código foi **compilado e executado com
+sucesso** contra o NeoPZ real (padrão extraído de
+`UnitTest_PZ/TestHDivCollapsed` e `TPZMultiphysicsCompMesh.h`).
 
 ## A ideia central: TRÊS malhas computacionais
 
@@ -20,7 +21,9 @@ A formulação mista **não** usa uma `TPZCompMesh` única com
    marcar todos os connects com `SetLagrangeMultiplier(1)`.
 3. **Malha MULTIFÍSICA** (`TPZMultiphysicsCompMesh`) — é aqui que moram o
    material de verdade (`TPZMixedDarcyFlow`) e as condições de contorno.
-   Em vez de `AutoBuild()`, chama-se
+   **Obrigatório** chamar `SetAllCreateFunctionsMultiphysicElem()` antes de
+   construir (sem isso: `DebugStop` dentro do NeoPZ — descoberto executando
+   esta receita). Em vez de `AutoBuild()`, chama-se
    `BuildMultiphysicsSpace(ativas, malhas)` com `malhas = {fluxo, pressao}`
    (fluxo **primeiro**) e `ativas = {1, 1}`.
 
@@ -28,8 +31,9 @@ Antes de criar cada malha: `gmesh->ResetReference();`
 
 ## Material e contorno
 
-- **Classe**: `TPZMixedDarcyFlow` — header `TPZMixedDarcyFlow.h`
-  (`Material/DarcyFlow/`). Construtor: `TPZMixedDarcyFlow(int id, int dim)`.
+- **Classe**: `TPZMixedDarcyFlow` — include `"DarcyFlow/TPZMixedDarcyFlow.h"`
+  (com o prefixo da família; só o basename não compila).
+  Construtor: `TPZMixedDarcyFlow(int id, int dim)`.
 - **Permeabilidade**: `SetConstantPermeability(STATE k)`.
 - **Termo fonte**: `SetForcingFunction(lambda, pOrder)` (std::function).
 - **Contorno na formulação mista**: `tipo 0` impõe **pressão**;
@@ -56,7 +60,7 @@ Nomes reais do `TPZMixedDarcyFlow` (ver `VariableIndex`): `"Pressure"`
 #include "pzcmesh.h"                  // TPZCompMesh
 #include "TPZMultiphysicsCompMesh.h"  // TPZMultiphysicsCompMesh
 #include "TPZNullMaterial.h"          // TPZNullMaterial (malhas atômicas)
-#include "TPZMixedDarcyFlow.h"        // TPZMixedDarcyFlow (API atual)
+#include "DarcyFlow/TPZMixedDarcyFlow.h"  // TPZMixedDarcyFlow (API atual — prefixo da família!)
 #include "TPZLinearAnalysis.h"        // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"          // TPZSkylineStructMatrix
 #include "pzstepsolver.h"             // TPZStepSolver
@@ -135,6 +139,9 @@ int main() {
     auto *bnd = mat->CreateBC(mat, matIdContorno, 0, val1, val2);  // pressão = 0
     cmesh->InsertMaterialObject(bnd);
 
+    // Estilo multifísico ANTES de construir — sem isso: DebugStop
+    cmesh->SetAllCreateFunctionsMultiphysicElem();
+
     TPZManVector<TPZCompMesh *, 2> malhas = {cmeshFluxo, cmeshPressao};
     TPZManVector<int, 2> ativas = {1, 1};
     cmesh->BuildMultiphysicsSpace(ativas, malhas);
@@ -181,4 +188,7 @@ int main() {
   elementos computacionais apontam para a malha errada.
 - **Chamar `AutoBuild()` na multifísica** — quem constrói é
   `BuildMultiphysicsSpace(ativas, malhas)`.
+- **Esquecer `SetAllCreateFunctionsMultiphysicElem()` antes do
+  `BuildMultiphysicsSpace`** — `DebugStop` imediato dentro do NeoPZ.
+- **`#include "TPZMixedDarcyFlow.h"` sem o prefixo `DarcyFlow/`** — não compila.
 - **`TPZMixedPoisson`** — legado; usar `TPZMixedDarcyFlow`.

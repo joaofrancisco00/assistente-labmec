@@ -16,7 +16,8 @@
 #include "pzcmesh.h"                  // TPZCompMesh
 #include "TPZMultiphysicsCompMesh.h"  // TPZMultiphysicsCompMesh
 #include "TPZNullMaterial.h"          // TPZNullMaterial (malhas atômicas)
-#include "TPZMixedDarcyFlow.h"        // TPZMixedDarcyFlow (API atual)
+#include "DarcyFlow/TPZMixedDarcyFlow.h"  // TPZMixedDarcyFlow (API atual —
+                                          // prefixo da família DarcyFlow/)
 #include "TPZLinearAnalysis.h"        // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"          // TPZSkylineStructMatrix
 #include "pzstepsolver.h"             // TPZStepSolver
@@ -108,6 +109,11 @@ int main() {
     TPZManVector<STATE, 1> val2 = {0.};
     auto *bnd = mat->CreateBC(mat, matIdContorno, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
+
+    // O estilo do espaço PRECISA ser definido como multifísico ANTES do
+    // BuildMultiphysicsSpace — sem isso, DebugStop em
+    // TPZMultiphysicsCompMesh.cpp:94 (descoberto executando esta receita).
+    cmesh->SetAllCreateFunctionsMultiphysicElem();
 
     // Combina as malhas atômicas (fluxo PRIMEIRO, pressão depois) —
     // substitui o AutoBuild da malha multifísica.
