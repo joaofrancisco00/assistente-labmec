@@ -35,7 +35,10 @@ except ImportError:
 from langchain_core.documents import Document
 
 # ── Configurações ──────────────────────────────────────────────────────────────
-ANALISE_DIR = Path.home() / "Downloads" / "ai-analysis"
+# A wiki vive DENTRO do projeto (wiki_neopz/) — versionada no git e portável
+# para outras máquinas. Antes ficava em ~/Downloads/ai-analysis, que quebrava
+# silenciosamente em qualquer computador que não fosse o original.
+ANALISE_DIR = Path("./wiki_neopz")
 WIKI_DIR    = ANALISE_DIR / "wiki"
 INDEX_DIR   = Path("./banco_chroma")
 EMBED_MODEL = "BAAI/bge-base-en-v1.5"
