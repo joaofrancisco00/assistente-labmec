@@ -916,7 +916,20 @@ def _corrigir_includes_automaticamente(
         return atuais
 
     atuais = _includes_atuais(linhas)
-    candidatos_chute = {f"{c.lower()}.h" for c in necessarios}
+    # Dois padrões de include "chutado" a partir do nome da classe:
+    #   TPZInt1d → "tpzint1d.h"  e  "pzint1d.h"
+    # O segundo imita a convenção real do NeoPZ (pzgmesh.h, pzcmesh.h,
+    # pzquad.h) e por isso é o chute mais frequente — era o que escapava:
+    # numa explicação de TPZInt1d o modelo escrevia #include "pzint1d.h"
+    # (o header verdadeiro é pzquad.h) e a remoção automática não pegava.
+    # A guarda `nome not in headers_whitelist` garante que só some include
+    # que de fato não existe.
+    candidatos_chute = set()
+    for c in necessarios:
+        base = c.lower()
+        candidatos_chute.add(f"{base}.h")
+        if base.startswith("tpz"):
+            candidatos_chute.add(f"pz{base[3:]}.h")
     linhas_remover = {
         idx for nome, idx in atuais.items()
         if nome.lower() in INCLUDES_LIXO_CONHECIDOS

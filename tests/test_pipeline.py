@@ -90,6 +90,28 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         self.assertIn('#include "Poisson/TPZMatPoisson.h"', corrigido)
         self.assertNotIn('#include "TPZMatPoisson.h"', corrigido)
 
+    def test_chute_estilo_pz_e_removido(self):
+        # Regressão real (capturada pelo eval): ao explicar TPZInt1d o modelo
+        # escrevia #include "pzint1d.h" — header inexistente, imitando a
+        # convenção pzgmesh.h/pzquad.h. O certo é pzquad.h.
+        codigo = '#include "pzint1d.h"\n\nTPZInt1d regra(2, 0);\n'
+        corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
+            codigo,
+            {"TPZInt1d": "Integral/pzquad.h"},
+            {},
+            {"pzquad.h"},   # whitelist real: pzint1d.h NÃO existe
+        )
+        self.assertNotIn("pzint1d.h", corrigido)
+        self.assertIn('#include "pzquad.h"', corrigido)
+
+    def test_chute_nao_remove_header_que_existe(self):
+        # Trava de segurança: se o include "chutado" for um header REAL,
+        # ele não pode ser removido
+        codigo = '#include "pzgmesh.h"\n\nTPZGeoMesh *g = new TPZGeoMesh();\n'
+        corrigido, _ = pipeline._corrigir_includes_automaticamente(
+            codigo, {"TPZGeoMesh": "Mesh/pzgmesh.h"}, {}, {"pzgmesh.h"})
+        self.assertIn('#include "pzgmesh.h"', corrigido)
+
     def test_include_lixo_removido_e_certo_injetado(self):
         codigo = ('#include "pz.h"\n#include <iostream>\n\n'
                   'int main() { TPZGeoMesh *g = new TPZGeoMesh(); }\n')
