@@ -39,7 +39,7 @@ from cpp_parser import (
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 BASE_DIR               = Path("./base_de_dados")   # pasta com .h e .cpp do NeoPZ
-INDEX_DIR              = Path("./banco_chroma")
+INDEX_DIR              = Path("./banco_chroma_develop")  # ver nota em pipeline.py
 WHITELIST_FILE          = INDEX_DIR / "whitelist.txt"
 LEGACY_CLASSES_FILE     = INDEX_DIR / "legacy_classes.txt"
 HEADERS_WHITELIST_FILE  = INDEX_DIR / "headers_whitelist.txt"

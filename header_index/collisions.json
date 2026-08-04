@@ -28,6 +28,10 @@
     "SubStruct/tpzdohrsubstruct.h",
     "SubStruct/tpzdohrsubstructCondense.h"
   ],
+  "EWhichMatrix": [
+    "Material/TPZMatGeneralisedEigenVal.h",
+    "Material/TPZMatQuadraticEigenVal.h"
+  ],
   "Eltype": [
     "Publications/hdiv2dpaper201504.h",
     "Publications/hdiv3dpaper201504.h",
@@ -44,6 +48,7 @@
     "Shape/pzshapeextend.h"
   ],
   "Geo": [
+    "Mesh/TPZGeoElement.h",
     "Mesh/tpzgeoelmapped.h",
     "Mesh/tpzgeoelrefpattern.h"
   ],
@@ -80,6 +85,18 @@
     "Pre/TPZAnalyticSolution.h",
     "Pre/TPZMHMeshControl.h"
   ],
+  "MProperty": [
+    "Solvers/TPZMumpsSolver.h",
+    "Solvers/TPZPardisoSolver.h"
+  ],
+  "MVoigt": [
+    "Material/Elasticity/TPZMixedElasticityND.h",
+    "Material/needrefactor/REAL/TPZMixedElasticityMaterial.h"
+  ],
+  "Mat": [
+    "Analysis/TPZEigenAnalysis.h",
+    "Analysis/TPZQuadEigenAnalysis.h"
+  ],
   "SOLUTIONVARS": [
     "Material/Elasticity/TPZElasticity3D.h",
     "Material/Plasticity/TPZMatPorous.h",
@@ -97,8 +114,13 @@
     "Material/DarcyFlow/TPZMixedDarcyFractureFlow.h",
     "Material/Elasticity/TPZElasticity2D.h",
     "Material/Elasticity/TPZElasticity3D.h",
-    "Material/Electromagnetics/TPZPlanarWGScattering.h",
-    "Material/Electromagnetics/TPZWaveguideModalAnalysis.h",
+    "Material/Elasticity/TPZHybridElasticity3D.h",
+    "Material/Elasticity/TPZHybridMixedElasticityUP.h",
+    "Material/Elasticity/TPZMixedElasticityND.h",
+    "Material/Electromagnetics/TPZAnisoWgma.h",
+    "Material/Electromagnetics/TPZScalarField.h",
+    "Material/Electromagnetics/TPZScattering.h",
+    "Material/Electromagnetics/TPZWgma.h",
     "Material/Plasticity/TPZMatElastoPlastic.h",
     "Material/Poisson/TPZMatPoisson.h",
     "Material/Projection/TPZHCurlProjection.h",
@@ -107,6 +129,7 @@
     "Material/Projection/TPZL2ProjectionCS.h",
     "Material/TPZLagrangeMultiplier.h",
     "Material/TPZLagrangeMultiplierCS.h",
+    "Material/TPZMatInterfaceHybridElasticityStokes.h",
     "Material/TPZNullMaterial.h",
     "Material/TPZNullMaterialCS.h",
     "Post/pzpostprocmat.h",
@@ -116,12 +139,26 @@
     "UnitTest_PZ/TestDeRham/TPZMatDeRhamHCurlHDiv.h",
     "UnitTest_PZ/TestDeRham/TPZMatDeRhamHDiv.h",
     "UnitTest_PZ/TestDeRham/TPZMatDeRhamHDivL2.h",
-    "UnitTest_PZ/TestDeRham/TPZMatDeRhamL2.h"
+    "UnitTest_PZ/TestDeRham/TPZMatDeRhamL2.h",
+    "UnitTest_PZ/TestMesh/TPZMatL2Product.h",
+    "UnitTest_PZ/TestSBFem/TPZDarcySBFemHdiv.h"
   ],
   "TComputeSequence": [
     "Material/Plasticity/TPZMohrCoulombNeto.h",
     "Material/Plasticity/TPZMohrCoulombPV.h",
     "Material/Plasticity/TPZYCMohrCoulombPV.h"
+  ],
+  "TContributeBCType": [
+    "Material/Electromagnetics/TPZAnisoWgma.h",
+    "Material/Electromagnetics/TPZWgma.h"
+  ],
+  "TContributeType": [
+    "Material/Electromagnetics/TPZAnisoWgma.h",
+    "Material/Electromagnetics/TPZWgma.h"
+  ],
+  "TElasticityAtPoint": [
+    "Material/Elasticity/TPZMixedElasticityND.h",
+    "Material/needrefactor/REAL/TPZMixedElasticityMaterial.h"
   ],
   "TFAD": [
     "Material/Plasticity/TPZLadeKim.h",
@@ -143,6 +180,7 @@
     "Material/TPZMatInterfaceCombinedSpaces.h",
     "Material/TPZMatInterfaceSingleSpace.h",
     "Material/TPZMatLoadCases.h",
+    "Material/TPZMatQuadraticEigenVal.h",
     "Material/TPZMatSingleSpace.h",
     "Material/TPZMatWithMem.h"
   ],
@@ -155,6 +193,10 @@
   "TPZBlackOil2P3D": [
     "Material/BlackOil/TPZBlackOil2P3D.h",
     "Material/needrefactor/REAL/pzblackoil2p3d.h"
+  ],
+  "TPZCompEl": [
+    "Mesh/pzcompel.h",
+    "Mesh/pzcondensedcompel.h"
   ],
   "TPZCurve": [
     "UnitTest_PZ/TestGeometry/TPZCurve.h",
@@ -183,6 +225,15 @@
   "TPlasticState": [
     "Material/Plasticity/TPZMohrCoulombNeto.h",
     "Material/Plasticity/TPZMohrCoulombPV.h"
+  ],
+  "TTOPOL": [
+    "Shape/pzshapecube.h",
+    "Shape/pzshapelinear.h",
+    "Shape/pzshapepiram.h",
+    "Shape/pzshapeprism.h",
+    "Shape/pzshapequad.h",
+    "Shape/pzshapetetra.h",
+    "Shape/pzshapetriang.h"
   ],
   "ThreadData": [
     "Analysis/TPZAnalysis.h",
@@ -229,6 +280,7 @@
     "Shape/pzshapepoint.h",
     "SpecialMaps/TPZQuadSphere.h",
     "SpecialMaps/tpzarc3d.h",
+    "SpecialMaps/tpzblendnaca.h",
     "SpecialMaps/tpzellipse3d.h",
     "SpecialMaps/tpzquadraticcube.h",
     "SpecialMaps/tpzquadraticline.h",
@@ -238,9 +290,15 @@
     "SpecialMaps/tpzquadratictetra.h",
     "SpecialMaps/tpzquadratictrig.h"
   ],
+  "Type": [
+    "Analysis/TPZAnalysis.h",
+    "Matrix/pzmatrix.h",
+    "Post/TPZVTKGenerator.h"
+  ],
   "const_iterator": [
     "Common/FAD/utils/vectors.h",
-    "Util/TPZChunkVector.h"
+    "Util/TPZChunkVector.h",
+    "Util/pzvec.h"
   ],
   "const_pointer": [
     "Common/FAD/utils/vectors.h",
@@ -295,7 +353,8 @@
   ],
   "iterator": [
     "Common/FAD/utils/vectors.h",
-    "Util/TPZChunkVector.h"
+    "Util/TPZChunkVector.h",
+    "Util/pzvec.h"
   ],
   "pointer": [
     "Common/FAD/utils/vectors.h",
@@ -314,13 +373,14 @@
     "Geom/pznoderep.h",
     "Geom/pznoderep.h.h",
     "Geom/tpzgeoblend.h",
-    "SpecialMaps/TPZCylinder.h",
+    "SpecialMaps/TPZCylinderMap.h",
     "SpecialMaps/TPZQuadSphere.h",
     "SpecialMaps/TPZQuadTorus.h",
     "SpecialMaps/TPZTriangleSphere.h",
     "SpecialMaps/TPZTriangleTorus.h",
     "SpecialMaps/TPZWavyLine.h",
     "SpecialMaps/tpzarc3d.h",
+    "SpecialMaps/tpzblendnaca.h",
     "SpecialMaps/tpzellipse3d.h",
     "SpecialMaps/tpzquadraticcube.h",
     "SpecialMaps/tpzquadraticline.h",
@@ -356,7 +416,8 @@
     "Shape/pzshapeprism.h",
     "Shape/pzshapequad.h",
     "Shape/pzshapetetra.h",
-    "Shape/pzshapetriang.h"
+    "Shape/pzshapetriang.h",
+    "Shape/pzshapewideprism.h"
   ],
   "pztopology": [
     "Topology/PrismExtend.h",
@@ -381,7 +442,8 @@
   ],
   "type": [
     "Common/FAD/TinyFadET/tfad.h",
-    "Common/pzreal.h"
+    "Common/pzreal.h",
+    "Solvers/TPZMumpsSolver.h"
   ],
   "value_type": [
     "Common/FAD/Fad/fad.h",
@@ -412,6 +474,7 @@
     "Common/FAD/utils/promote.h",
     "Common/FAD/utils/tinyvec.h",
     "Common/FAD/utils/vectors.h",
-    "Util/TPZChunkVector.h"
+    "Util/TPZChunkVector.h",
+    "Util/pzvec.h"
   ]
 }

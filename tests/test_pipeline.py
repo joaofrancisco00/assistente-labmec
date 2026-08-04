@@ -134,10 +134,13 @@ class TestRenomeacoes(unittest.TestCase):
         # sempre existe e não é ele próprio do legado.
         renames = pipeline._carregar_renames()
         self.assertIn("TPZMatLaplacian", renames)
+        # Índice desta branch (banco_chroma_develop/) — não o da main
+        if not pipeline.WHITELIST_FILE.exists():
+            self.skipTest(f"{pipeline.WHITELIST_FILE} ausente — rode indexer.py")
         whitelist = set(
-            Path("banco_chroma/whitelist.txt").read_text(encoding="utf-8").splitlines())
+            pipeline.WHITELIST_FILE.read_text(encoding="utf-8").splitlines())
         legado = set(
-            Path("banco_chroma/legacy_classes.txt").read_text(encoding="utf-8").splitlines())
+            pipeline.LEGACY_CLASSES_FILE.read_text(encoding="utf-8").splitlines())
         for antiga, nova in renames.items():
             self.assertTrue(antiga not in whitelist or antiga in legado,
                             f"'{antiga}' existe na API atual — entrada desnecessária")

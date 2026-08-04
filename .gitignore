@@ -6,8 +6,9 @@ __pycache__/
 # Build C++ / CMake
 build/
 
-# Banco vetorial Chroma (regenerável pelo indexer)
-banco_chroma/
+# Banco vetorial Chroma (regenerável pelo indexer). O glob cobre o
+# banco_chroma_develop/ desta branch — cada branch tem o seu, ver pipeline.py
+banco_chroma*/
 
 # NeoPZ agora é um git submodule (base_de_dados/neopz) pinado na revisão
 # validada — clone com: git clone --recursive

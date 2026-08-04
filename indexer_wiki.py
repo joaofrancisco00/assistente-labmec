@@ -40,7 +40,7 @@ from langchain_core.documents import Document
 # silenciosamente em qualquer computador que não fosse o original.
 ANALISE_DIR = Path("./wiki_neopz")
 WIKI_DIR    = ANALISE_DIR / "wiki"
-INDEX_DIR   = Path("./banco_chroma")
+INDEX_DIR   = Path("./banco_chroma_develop")  # ver nota em pipeline.py
 EMBED_MODEL = "BAAI/bge-base-en-v1.5"
 COL_WIKI    = "neopz_wiki"
 

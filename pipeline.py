@@ -33,7 +33,14 @@ OLLAMA_MODEL           = "qwen2.5-coder:7b"
 NUM_CTX                = 16384
 
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
-INDEX_DIR              = Path("./banco_chroma")
+
+# Índice PRÓPRIO desta branch (gerado contra o NeoPZ do develop). O
+# banco_chroma/ não é versionado, então ele é compartilhado entre branches no
+# mesmo working tree: se as duas usassem o mesmo diretório, reindexar aqui
+# apagaria o índice da main (~360 MB, minutos de embedding) e a main passaria
+# a validar contra a whitelist do develop sem ninguém perceber. Diretórios
+# separados deixam as duas coexistirem — trocar de branch não exige reindexar.
+INDEX_DIR              = Path("./banco_chroma_develop")
 WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
 HEADERS_WHITELIST_FILE = INDEX_DIR / "headers_whitelist.txt"
 

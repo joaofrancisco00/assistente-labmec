@@ -1,3 +1,7 @@
 [submodule "base_de_dados/neopz"]
 	path = base_de_dados/neopz
 	url = https://github.com/labmec/neopz.git
+	# O branch 'main' do labmec/neopz está congelado em 4c6b6d277 (2022-03-18);
+	# o desenvolvimento real acontece no 'develop'. Esta branch do assistente
+	# acompanha o develop — o commit exato continua pinado pelo submodule.
+	branch = develop

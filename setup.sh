@@ -50,10 +50,10 @@ if [ -f .gitmodules ] && [ ! -f base_de_dados/neopz/CMakeLists.txt ]; then
 fi
 
 # ── Índice vetorial ───────────────────────────────────────────────────────────
-if [ -f banco_chroma/whitelist.txt ]; then
-    echo "✅ Índice (banco_chroma/) encontrado — nada a reindexar"
+if [ -f banco_chroma_develop/whitelist.txt ]; then
+    echo "✅ Índice (banco_chroma_develop/) encontrado — nada a reindexar"
 else
-    echo "⚠️  banco_chroma/ ausente ou incompleto."
+    echo "⚠️  banco_chroma_develop/ ausente ou incompleto."
     if [ -d base_de_dados/neopz ]; then
         echo "   Snapshot do NeoPZ encontrado. Gere o índice com:"
         echo "     venv/bin/python indexer.py"
