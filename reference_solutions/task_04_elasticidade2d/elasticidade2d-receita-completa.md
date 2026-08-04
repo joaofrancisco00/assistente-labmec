@@ -1,8 +1,7 @@
 # Receita completa: elasticidade linear 2D com a API atual do NeoPZ
 
 Fluxo canônico para elasticidade linear 2D (estado plano de tensão ou
-deformação) com Dirichlet, usando a **API atual**. Este código foi
-**compilado e executado com sucesso** contra o NeoPZ real. O esqueleto
+deformação) com Dirichlet, usando a **API atual**. O esqueleto
 (malha → cmesh → material → contorno → AutoBuild → Assemble → Solve) é o
 mesmo da receita do Poisson 2D — o que muda é o material e tudo que decorre
 de a solução ser vetorial.

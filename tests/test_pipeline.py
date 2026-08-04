@@ -201,6 +201,36 @@ class TestLogDeInteracoes(unittest.TestCase):
             pipeline._registrar_interacao("pergunta", self.RESULTADO, caminho)  # não levanta
 
 
+class TestReservaDeVagasNaWiki(unittest.TestCase):
+    def _doc(self, nome, tipo):
+        from langchain_core.documents import Document
+        return Document(page_content=nome, metadata={"tipo": tipo})
+
+    def test_catalogo_entra_mesmo_perdendo_em_relevancia(self):
+        # Regressão real: numa pergunta sobre Darcy em H1, as 3 vagas foram
+        # ocupadas pelas receitas e o catálogo problema→material — único
+        # documento que aponta TPZDarcyFlow — ficou de fora.
+        pool = [self._doc("receita1", "doc_fluxo"),
+                self._doc("receita2", "doc_fluxo"),
+                self._doc("receita3", "doc_fluxo"),
+                self._doc("catalogo", "doc_conceito")]
+        escolhidos = [d.page_content for d in
+                      pipeline._reservar_vagas_conceitos(pool, k=3, reservadas=1)]
+        self.assertIn("catalogo", escolhidos)
+        self.assertEqual(len(escolhidos), 3)
+
+    def test_sem_conceito_disponivel_nao_perde_vaga(self):
+        pool = [self._doc(f"receita{i}", "doc_fluxo") for i in range(4)]
+        escolhidos = pipeline._reservar_vagas_conceitos(pool, k=3, reservadas=1)
+        self.assertEqual(len(escolhidos), 3)
+
+    def test_reserva_zero_preserva_ordem_original(self):
+        pool = [self._doc("a", "doc_fluxo"), self._doc("b", "doc_conceito")]
+        escolhidos = [d.page_content for d in
+                      pipeline._reservar_vagas_conceitos(pool, k=2, reservadas=0)]
+        self.assertEqual(escolhidos, ["a", "b"])
+
+
 class TestPerguntaExplicativa(unittest.TestCase):
     def test_explicativas(self):
         for p in ("O que é a classe TPZGeoMesh e para que ela serve?",

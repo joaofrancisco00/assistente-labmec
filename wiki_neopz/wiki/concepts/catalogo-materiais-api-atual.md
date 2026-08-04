@@ -22,12 +22,25 @@ família — `#include "Poisson/TPZMatPoisson.h"`,
 - 1 variável de estado → `val2` do contorno com 1 entrada
 - Nomes antigos que NÃO existem mais: `TPZMatLaplacian`, `TPZMatPoisson3d` (legado)
 
-## Darcy H1 (pressão)
+## Darcy — três formulações, três classes (não confundir)
+
+| Formulação | Classe | Espaço / malhas |
+|---|---|---|
+| Primal (**H1**) | `TPZDarcyFlow` | H1 contínuo, **uma** malha |
+| Mista | `TPZMixedDarcyFlow` | H(div) + L2, **três** malhas (multifísica) |
+| Hibridizada | `TPZHybridDarcyFlow` | espaços **combinados** (hibridização/MHM); herda de `TPZDarcyFlow`, mas **não** serve como material de malha H1 simples |
+
+## Darcy H1 (pressão) — formulação primal
 
 - **Classe**: `TPZDarcyFlow` — include `"DarcyFlow/TPZDarcyFlow.h"`
 - **Construtor**: `TPZDarcyFlow(int id, int dim)`
 - **Permeabilidade**: `SetConstantPermeability(STATE k)` ou
   `SetPermeabilityFunction(...)` (herdados de `TPZIsotropicPermeability`)
+- **Malha**: uma só, `SetAllCreateFunctionsContinuous()`; solver `ECholesky`
+  (SPD) — ver a receita completa do Darcy H1
+- **Contorno**: tipo 0 = pressão imposta, tipo 1 = fluxo normal imposto
+- **Pós-processamento**: `"Pressure"`/`"Solution"` (escalar),
+  `"Flux"`/`"MinusKGradU"` (vetor), `"Derivative"`/`"GradU"`, `"Divergence"`
 
 ## Darcy misto / H(div) (fluxo + pressão)
 

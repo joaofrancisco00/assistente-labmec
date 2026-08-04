@@ -127,6 +127,12 @@ assinatura, não recompiladas**:
   `SetElasticity(...)` idênticas; `BuildMultiphysicsSpace` ganhou um `const`
   num parâmetro, que é compatível para quem chama.
 
+A receita de Darcy H1 (`task_06_darcy_h1`) é a mais sólida das quatro nesta
+branch: foi compilada e executada contra a instalação de 2022 **e** o que ela
+usa (`TPZDarcyFlow(id, dim)`, `SetConstantPermeability`, e os nomes
+`"Pressure"`/`"Flux"` do `VariableIndex`) foi conferido linha a linha nas
+**duas** revisões — são idênticos.
+
 A evidência é forte, mas **não substitui compilar**. Pendências antes de
 considerar esta branch verificada de ponta a ponta:
 

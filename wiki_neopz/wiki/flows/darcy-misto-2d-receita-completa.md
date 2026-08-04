@@ -1,9 +1,8 @@
 # Receita completa: Darcy 2D na formulação mista (H(div) + L2) com a API atual do NeoPZ
 
 Fluxo canônico para a equação de Darcy na formulação mista — fluxo e pressão
-como incógnitas simultâneas. Este código foi **compilado e executado com
-sucesso** contra o NeoPZ real (padrão extraído de
-`UnitTest_PZ/TestHDivCollapsed` e `TPZMultiphysicsCompMesh.h`).
+como incógnitas simultâneas. Padrão extraído de
+`UnitTest_PZ/TestHDivCollapsed` e `TPZMultiphysicsCompMesh.h`.
 
 ## A ideia central: TRÊS malhas computacionais
 

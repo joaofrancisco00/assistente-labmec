@@ -100,6 +100,15 @@ COL_WIKI     = "neopz_wiki"        # documentação curada (wiki do professor)
 
 K_WIKI       = 3                   # chunks da wiki a recuperar por consulta
 
+# Vagas de K_WIKI reservadas para documentos que NÃO são receitas (doc_fluxo).
+# As receitas são longas e semanticamente densas, então vencem qualquer
+# disputa por similaridade: numa pergunta sobre "Darcy em H1" as 3 vagas
+# foram ocupadas pelas receitas de poisson/elasticidade/darcy-misto e o
+# catálogo problema→material — o ÚNICO documento que diz "Darcy em H1 →
+# TPZDarcyFlow" — ficou de fora, justamente na pergunta em que era decisivo.
+# O problema piora a cada receita nova, por isso a reserva é fixa.
+K_WIKI_CONCEITOS = 1
+
 # Headers "chute" que o modelo inventa e que NÃO existem no projeto — removidos
 # automaticamente na correção pós-geração (ver _corrigir_includes_automaticamente).
 INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
@@ -297,6 +306,27 @@ def _pergunta_e_explicativa(pergunta: str) -> bool:
             and not _PEDIDO_DE_CODIGO_RE.search(pergunta))
 
 
+def _reservar_vagas_conceitos(docs: list, k: int, reservadas: int) -> list:
+    """
+    Escolhe k documentos da wiki garantindo que pelo menos `reservadas` NÃO
+    sejam receitas (tipo 'doc_fluxo') — ver K_WIKI_CONCEITOS para o caso real
+    que motivou isto. Os reservados vêm primeiro (o catálogo é um mapa de
+    seleção: serve melhor ANTES dos exemplos), o resto entra por relevância.
+    """
+    if reservadas <= 0:
+        return docs[:k]
+    nao_receitas = [d for d in docs if d.metadata.get("tipo") != "doc_fluxo"]
+    escolhidos = nao_receitas[:reservadas]
+    vistos = {d.page_content for d in escolhidos}
+    for doc in docs:
+        if len(escolhidos) >= k:
+            break
+        if doc.page_content not in vistos:
+            vistos.add(doc.page_content)
+            escolhidos.append(doc)
+    return escolhidos[:k]
+
+
 def _dedup_docs(docs: list) -> list:
     """Remove documentos duplicados preservando a ordem (chave = conteúdo)."""
     vistos, unicos = set(), []
@@ -366,7 +396,10 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
             # Pergunta explicativa: receitas fora do contexto (ver
             # _pergunta_e_explicativa) — conceitos/código da wiki continuam
             w_pool = [d for d in w_pool if d.metadata.get("tipo") != "doc_fluxo"]
-        w_docs = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")[:K_WIKI]
+        w_docs = _reservar_vagas_conceitos(
+            _boost_por_classe(w_pool, classes_citadas, "classes_usadas"),
+            K_WIKI, K_WIKI_CONCEITOS,
+        )
 
     all_docs = h_docs + e_docs + w_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}
@@ -585,6 +618,9 @@ INSTRUÇÕES:
   explicada. NUNCA cole um programa completo de outro assunto como "exemplo"
 - Se o usuário pedir código/programa, gere com explicações do que cada parte faz
 - Combine texto explicativo e código quando fizer sentido
+- NUNCA afirme que o código que você gerou foi compilado, testado ou executado
+  com sucesso — você não compilou nada. Se a documentação do contexto disser
+  que um exemplo foi verificado, isso vale para AQUELE exemplo, não para o seu
 
 {contexto}{_formatar_historico(historico)}
 

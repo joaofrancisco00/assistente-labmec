@@ -1,10 +1,10 @@
 # Receita completa: Poisson 2D com a API atual do NeoPZ
 
 Fluxo canônico para resolver `-∇²u = f` num retângulo com condição de
-Dirichlet, usando a **API atual** (pós-refatoração de materiais). Este
-código foi **compilado e executado com sucesso** contra o NeoPZ real
-(reference_solutions/ tem o CMakeLists). Use este exemplo como esqueleto
-para qualquer problema H1 escalar.
+Dirichlet, usando a **API atual** (pós-refatoração de materiais). Use este
+exemplo como esqueleto para qualquer problema H1 escalar.
+(O estado de verificação desta receita está no README do projeto, não aqui:
+essa informação é para quem mantém o assistente, não para copiar na resposta.)
 
 **Include de material da API nova leva o prefixo da família**:
 `#include "Poisson/TPZMatPoisson.h"` — só `"TPZMatPoisson.h"` NÃO compila

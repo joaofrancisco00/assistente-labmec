@@ -14,6 +14,7 @@ logs/eval_<data>.json. Código de saída != 0 se qualquer verificação falhar.
 """
 import datetime
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -40,6 +41,18 @@ def _sem_receita_colada(resposta: str) -> bool:
     """
     marcadores = ("CreateGeoMeshOnGrid", "DefineGraphMesh", "SetForcingFunction")
     return sum(m in resposta for m in marcadores) < 2
+
+
+# O modelo copiava o selo "compilado e executado com sucesso" das receitas e
+# o aplicava ao código que ELE gerou (que nunca foi compilado) — confiança
+# falsa, o pior tipo de erro para um aluno. Selo removido das receitas +
+# instrução no prompt; este check protege as duas correções.
+_ALEGACAO_COMPILACAO_RE = re.compile(
+    r"(compil|execut)[a-zá-úâ-ûã-õç]*(\s+\S+){0,4}\s+com\s+sucesso", re.IGNORECASE)
+
+
+def _sem_alegacao_de_compilacao(resposta: str) -> bool:
+    return not _ALEGACAO_COMPILACAO_RE.search(resposta)
 
 
 def _exemplo_usa_a_classe(resposta: str, classe: str) -> bool:
@@ -93,6 +106,27 @@ CASOS = [
                                               and "BuildMultiphysicsSpace" in r["resposta"]),
             "solver_ponto_de_sela": lambda r: "ELDLt" in r["resposta"],
             "sem_cfd":             lambda r: "TPZFlowCompMesh" not in r["resposta"],
+            "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
+            "sem_alegacao_falsa":  lambda r: _sem_alegacao_de_compilacao(r["resposta"]),
+        },
+    },
+    {
+        # Família SEM receita até jul/2026: o modelo escolhia TPZHybridDarcyFlow
+        # (espaços combinados) porque o catálogo — único doc que aponta
+        # TPZDarcyFlow — era espremido do retrieval pelas receitas.
+        "nome": "darcy_h1_2d",
+        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
+                     "problema de fluxo de Darcy 2D usando o espaço de aproximação H1, "
+                     "com todos os includes necessários."),
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "material_h1":         lambda r: "TPZDarcyFlow" in r["resposta"],
+            "nao_usa_hibrido":     lambda r: "TPZHybridDarcyFlow" not in r["resposta"],
+            "nao_usa_misto":       lambda r: ("TPZMixedDarcyFlow" not in r["resposta"]
+                                              and "TPZMultiphysicsCompMesh" not in r["resposta"]),
+            "include_qualificado": lambda r: "DarcyFlow/TPZDarcyFlow.h" in r["resposta"],
+            "permeabilidade":      lambda r: "SetConstantPermeability" in r["resposta"],
+            "sem_alegacao_falsa":  lambda r: _sem_alegacao_de_compilacao(r["resposta"]),
             "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
         },
     },
