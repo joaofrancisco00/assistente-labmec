@@ -53,11 +53,12 @@ família — `#include "Poisson/TPZMatPoisson.h"`,
 ## Elasticidade linear 2D
 
 - **Classe**: `TPZElasticity2D` — include `"Elasticity/TPZElasticity2D.h"`
-- **Configuração**: usar `TPZElasticity2D(id)` + `SetElasticity(E, nu)` +
-  `SetBodyForce(fx, fy)` + `SetPlaneStress()`/`SetPlaneStrain()`.
-  **NÃO usar** o construtor `(id, E, nu, fx, fy, planestress)`: tem o corpo
-  vazio nesta revisão do NeoPZ (bug) — id fica -666 e a malha sai vazia sem
-  nenhum erro.
+- **Configuração**: usar o construtor completo
+  `TPZElasticity2D(id, E, nu, fx, fy, planestress)` — `planestress` 1 para
+  tensão plana, 0 para deformação plana.
+  **NÃO usar** `TPZElasticity2D(id)` + `SetElasticity(E, nu)`: `SetElasticity`
+  não inicializa a lei constitutiva, e o resultado sai com `SigmaX`/`SigmaY`
+  zerados e deslocamento errado — compilando e rodando sem nenhum aviso.
 - **Pós-processamento**: `"Displacement"`, `"SigmaX"`, `"SigmaY"`, `"TauXY"`,
   `"PrincipalStress1"`, `"PrincipalStress2"`
 - 2 variáveis de estado → `val1` 2×2 e `val2` com 2 entradas no contorno

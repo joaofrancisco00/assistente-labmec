@@ -13,22 +13,26 @@ de a solução ser vetorial.
 - **3D → `TPZElasticity3D`** — NÃO usar em problemas 2D; além da física
   errada, o construtor é diferente: `TPZElasticity3D(id, E, nu, TPZVec<STATE> &force)`.
 
-## Como configurar o material — ATENÇÃO, bug real do NeoPZ
+## Como configurar o material — ATENÇÃO, erro silencioso
 
-O construtor "completo" `TPZElasticity2D(id, E, nu, fx, fy, planestress)`
-**tem o corpo vazio** nesta revisão do NeoPZ (mar/2022): não seta nem o id
-(fica -666), o `AutoBuild` não cria nenhum elemento do domínio e o programa
-roda "com sucesso" produzindo resultado **vazio**, sem nenhuma mensagem de
-erro. Descoberto executando esta receita.
-
-O caminho seguro é o construtor `(id)` + setters:
+Use **sempre o construtor completo**. Ele é o único que inicializa a lei
+constitutiva (`fConstitutiveLaw`), que é o membro que de fato calcula tensão:
 
 ```cpp
-auto *mat = new TPZElasticity2D(matIdDominio);
-mat->SetElasticity(E, nu);   // módulo de Young + coeficiente de Poisson
-mat->SetBodyForce(fx, fy);   // força de corpo
-mat->SetPlaneStress();       // ou SetPlaneStrain() p/ deformação plana
+constexpr STATE E{1000.}, nu{0.3};
+constexpr STATE fx{0.}, fy{-1.};   // peso próprio para baixo
+constexpr int planeStress{1};      // 1 = tensão plana; 0 = deformação plana
+auto *mat = new TPZElasticity2D(matIdDominio, E, nu, fx, fy, planeStress);
 ```
+
+**Não** use o construtor de 1 argumento com `SetElasticity`: esse setter grava
+apenas `fE_def`/`fnu_def` e **não alcança a lei constitutiva**. O programa
+compila, roda, termina com `exit 0` e grava o VTK — mas `SigmaX`/`SigmaY` saem
+**zero em todos os pontos** e o deslocamento fica errado, sem nenhum aviso.
+Descoberto executando esta receita e comparando os campos do VTK.
+
+Nenhuma validação por nome pega esse erro: `TPZElasticity2D` e
+`SetElasticity` existem, e o código compila sem um único aviso.
 
 ## Diferenças em relação ao Poisson escalar
 
@@ -39,8 +43,8 @@ mat->SetPlaneStress();       // ou SetPlaneStrain() p/ deformação plana
    `"Displacement"` (vetor), `"SigmaX"`, `"SigmaY"`, `"TauXY"`,
    `"PrincipalStress1"`, `"PrincipalStress2"`, `"MaxStress"`.
    `"Solution"`/`"Derivative"` são do Poisson e **não existem** aqui.
-3. **Força de corpo** via `SetBodyForce(fx, fy)` — não precisa de
-   `SetForcingFunction` para carga constante.
+3. **Força de corpo** entra como `fx`/`fy` no próprio construtor — não precisa
+   de `SetForcingFunction` para carga constante.
 
 ## Código completo (compilável)
 
@@ -79,14 +83,12 @@ int main() {
     cmesh->SetAllCreateFunctionsContinuous();
 
     // 3. Material 2D (no heap — a malha assume a posse)
-    // NÃO usar o construtor (id, E, nu, fx, fy, planestress): corpo vazio
-    // nesta revisão do NeoPZ (bug) — usar (id) + setters
+    // Construtor completo: é o único que inicializa a lei constitutiva.
+    // Com (id) + SetElasticity, SigmaX/SigmaY saem ZERO sem erro nenhum.
     constexpr STATE E{1000.}, nu{0.3};
     constexpr STATE fx{0.}, fy{-1.};  // peso próprio
-    auto *mat = new TPZElasticity2D(matIdDominio);
-    mat->SetElasticity(E, nu);
-    mat->SetBodyForce(fx, fy);
-    mat->SetPlaneStress();
+    constexpr int planeStress{1};     // 1 = tensão plana; 0 = deformação plana
+    auto *mat = new TPZElasticity2D(matIdDominio, E, nu, fx, fy, planeStress);
     cmesh->InsertMaterialObject(mat);
 
     // 4. Engaste em todo o contorno (Dirichlet, tipo 0) — val2 com 2 entradas
@@ -125,9 +127,10 @@ int main() {
 - **`TPZElasticity3D` em problema 2D** — classe existe, compila o nome, mas é
   a física errada e o construtor é outro. Em 2D, sempre `TPZElasticity2D`.
 - **`TPZElasticity2D(id, dim)`** — esse construtor NÃO existe.
-- **`TPZElasticity2D(id, E, nu, fx, fy, planestress)`** — existe mas tem o
-  corpo VAZIO nesta revisão (bug do NeoPZ): id fica -666, malha sai vazia,
-  sem erro nenhum. Usar `(id)` + `SetElasticity`/`SetBodyForce`/`SetPlaneStress`.
+- **`TPZElasticity2D(id)` + `SetElasticity(E, nu)`** — compila e roda, mas
+  `SetElasticity` não inicializa a lei constitutiva: `SigmaX`/`SigmaY` saem
+  zero em todos os pontos e o deslocamento fica errado, sem nenhum aviso.
+  Usar o construtor completo `(id, E, nu, fx, fy, planestress)`.
 - **`#include "TPZElasticity2D.h"` sem o prefixo `Elasticity/`** — não compila.
 - **`val2` com 1 entrada** no `CreateBC` — elasticidade 2D tem 2 variáveis de
   estado; `val2 = {0., 0.}`.

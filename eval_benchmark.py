@@ -63,6 +63,25 @@ def _exemplo_usa_a_classe(resposta: str, classe: str) -> bool:
         return True  # sem programa — nada a exigir
     return classe in resposta[pos:]
 
+
+# TPZElasticity2D(id, E, nu, fx, fy, planestress) — 6 argumentos, 5 vírgulas.
+# É o ÚNICO construtor que inicializa fConstitutiveLaw, o membro que calcula
+# tensão. Com (id) + SetElasticity o programa compila, roda, termina com exit 0
+# e grava o VTK — com SigmaX/SigmaY ZERADOS em todos os pontos e deslocamento
+# errado. Nenhuma validação de nome pega: os dois nomes existem.
+#
+# ATENÇÃO ao histórico: até ago/2026 este check exigia exatamente o CONTRÁRIO
+# ("SetElasticity" in resposta), porque na revisão de 2022 o construtor completo
+# tinha o corpo vazio. O develop consertou o construtor e o padrão se inverteu.
+# Por isso o check mudou de nome — comparar `construtor_seguro` de evals antigos
+# com `construtor_completo` daqui pra frente seria comparar coisas opostas.
+_CTOR_ELAST_COMPLETO_RE = re.compile(r"TPZElasticity2D\s*\(([^)]*,){5}[^)]*\)")
+
+
+def _elasticidade_bem_construida(resposta: str) -> bool:
+    return (_CTOR_ELAST_COMPLETO_RE.search(resposta) is not None
+            and "SetElasticity" not in resposta)
+
 CASOS = [
     {
         "nome": "poisson_2d_completo",
@@ -89,7 +108,7 @@ CASOS = [
             "validacao_limpa":    lambda r: r["valido"],
             "material_2d":        lambda r: "TPZElasticity2D" in r["resposta"],
             "nao_usa_3d_em_2d":   lambda r: "TPZElasticity3D" not in r["resposta"],
-            "construtor_seguro":  lambda r: "SetElasticity" in r["resposta"],  # e não o ctor bugado
+            "construtor_completo": lambda r: _elasticidade_bem_construida(r["resposta"]),
             "sem_api_antiga":     lambda r: not r["classes_legado"],
             "max_2_tentativas":   lambda r: r["tentativas"] <= 2,
         },

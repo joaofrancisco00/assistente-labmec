@@ -1,0 +1,92 @@
+diff --git a/Analysis/TPZAnalysis.cpp b/Analysis/TPZAnalysis.cpp
+index f82068b6a..c7fac3732 100644
+--- a/Analysis/TPZAnalysis.cpp
++++ b/Analysis/TPZAnalysis.cpp
+@@ -11,7 +11,7 @@
+ #include <string.h>                        // for strcpy, strlen
+ #ifdef MACOSX
+ //#include <__functional_base>               // for less
+-#include <__tree>                          // for __tree_const_iterator, ope...
++//#include <__tree>                          // for __tree_const_iterator, ope...
+ #endif
+ #include <list>                            // for list, __list_iterator, lis...
+ #include <map>                             // for __map_iterator, map, map<>...
+diff --git a/Mesh/pzcmesh.cpp b/Mesh/pzcmesh.cpp
+index b034651e1..25a4a5001 100644
+--- a/Mesh/pzcmesh.cpp
++++ b/Mesh/pzcmesh.cpp
+@@ -6,7 +6,7 @@
+ #include "pzcmesh.h"
+ #ifdef MACOSX
+ //#include <__functional_base>               // for less
+-#include <__tree>                          // for __tree_const_iterator, ope...
++//#include <__tree>                          // for __tree_const_iterator, ope...
+ #endif
+ #include <cmath>                           // for fabs, sqrt, abs
+ #include <iterator>                        // for operator!=, reverse_iterator
+diff --git a/Mesh/tpzgeoelrefpattern.cpp b/Mesh/tpzgeoelrefpattern.cpp
+index 344e70a7d..89ce032c4 100644
+--- a/Mesh/tpzgeoelrefpattern.cpp
++++ b/Mesh/tpzgeoelrefpattern.cpp
+@@ -119,6 +119,23 @@ TPZGeoEl *CreateGeoElementPattern(TPZGeoMesh &mesh, MElementType type,
+ 
+ /** registration of the class in the TPZRestoreClass */
+ 
++/** Definicoes das instanciacoes explicitas declaradas como extern template em
++    tpzgeoelrefpattern.h.h — precisam existir em exatamente UMA unidade de
++    traducao, senao o link duplica os simbolos. */
++#define INSTANTIATECLASS(TCL) \
++template class \
++TPZRestoreClass<TPZGeoElRefPattern<TCL > >; \
++template class TPZGeoElRefPattern<TCL>;
++
++INSTANTIATECLASS(pzgeom::TPZGeoPoint)
++INSTANTIATECLASS(pzgeom::TPZGeoLinear)
++INSTANTIATECLASS(pzgeom::TPZGeoTriangle)
++INSTANTIATECLASS(pzgeom::TPZGeoQuad)
++INSTANTIATECLASS(pzgeom::TPZGeoCube)
++INSTANTIATECLASS(pzgeom::TPZGeoPrism)
++INSTANTIATECLASS(pzgeom::TPZGeoTetrahedra)
++INSTANTIATECLASS(pzgeom::TPZGeoPyramid)
++
+ //template class TPZRestoreClass< TPZGeoElRefPattern<TPZGeoCube>>;
+ //template class TPZRestoreClass< TPZGeoElRefPattern<TPZGeoLinear>>;
+ //template class TPZRestoreClass<TPZGeoElRefPattern<TPZGeoQuad>>;
+diff --git a/Mesh/tpzgeoelrefpattern.h.h b/Mesh/tpzgeoelrefpattern.h.h
+index 0ddb57705..8cb271c78 100644
+--- a/Mesh/tpzgeoelrefpattern.h.h
++++ b/Mesh/tpzgeoelrefpattern.h.h
+@@ -142,10 +142,15 @@ TPZGeoEl * TPZGeoElRefPattern<TGeo>::ClonePatchEl(TPZGeoMesh &DestMesh,
+ #include "pzgeopoint.h"
+ 
+ 
++/** Aqui vao apenas DECLARACOES de instanciacao (extern template): este header
++    e incluido por dezenas de TUs, e definicao explicita em header emite
++    typeinfo com ligacao forte no g++ (o clang emite weak e mascara o
++    problema), causando 32 simbolos duplicados no link da libpz. As
++    definicoes ficam em tpzgeoelrefpattern.cpp. */
+ #define INSERTCLASS(TCL) \
+-template class \
++extern template class \
+ TPZRestoreClass<TPZGeoElRefPattern<TCL > >; \
+-template class TPZGeoElRefPattern<TCL>;
++extern template class TPZGeoElRefPattern<TCL>;
+ 
+ INSERTCLASS(pzgeom::TPZGeoPoint)
+ INSERTCLASS(pzgeom::TPZGeoLinear)
+diff --git a/Save/TPZBFileStream.cpp b/Save/TPZBFileStream.cpp
+index cfc8f3df8..9b9581c67 100644
+--- a/Save/TPZBFileStream.cpp
++++ b/Save/TPZBFileStream.cpp
+@@ -104,3 +104,11 @@ void TPZBFileStream::ReadData<int>(int* p, int howMany);
+ 
+ template
+ void TPZBFileStream::ReadData<long>(long* p, int howMany);
++
++/** No macOS/arm64 int64_t e long long (no Linux, long) — sem estas duas
++    instanciacoes o link da libpz falha por simbolo indefinido. */
++template
++void TPZBFileStream::ReadData<long long>(long long* p, int howMany);
++
++template
++void TPZBFileStream::WriteData<long long const>(long long const* p, int howMany);
