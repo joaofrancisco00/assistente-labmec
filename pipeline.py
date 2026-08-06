@@ -1,8 +1,12 @@
 from pathlib import Path
 import datetime
+import os
 import re
 import json
 import difflib
+import shutil
+import subprocess
+import tempfile
 
 try:
     from langchain_ollama import OllamaLLM
@@ -118,6 +122,33 @@ INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
 # não encontrado" e disparava retries à toa).
 HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",
                    "time.h", "float.h", "limits.h", "ctype.h", "stddef.h"}
+
+# ── Compilação do código gerado ───────────────────────────────────────────────
+# A whitelist responde "esse nome existe em ALGUM lugar do NeoPZ"; o compilador
+# responde "esse método existe NESTA classe, com ESTA assinatura". A diferença
+# é exatamente o buraco que METHODS_WHITELIST_FILE deixa de propósito:
+# `mat->SetElasticity(E, nu)` num TPZDarcyFlow passa na whitelist global
+# (SetElasticity existe — em TPZElasticity2D) e o g++ recusa em 0,5 s.
+#
+# Custo medido com -fsyntax-only (sem link) nas 4 receitas de
+# reference_solutions/: 0,50–0,64 s cada, contra dezenas de segundos de geração
+# no 7b local. Compilar é ruído no orçamento do pipeline.
+#
+# Instalações candidatas, em ordem: a do develop (que ESTA branch indexa) e a de
+# 2022 como fallback (que a branch main valida). Casar a instalação com o índice
+# importa: compilar contra 2022 o código gerado a partir da whitelist do develop
+# acusaria como erro classe nova que existe de verdade. NEOPZ_PREFIX no
+# ambiente sobrescreve.
+NEOPZ_PREFIXES = (
+    Path.home() / "opt" / "neopz-develop",
+    Path("/opt/neopz"),
+)
+# Mesmo compilador que compilou o NeoPZ (no laboratório: g++ do MacPorts) — ver
+# README. Em -fsyntax-only não há link para quebrar, mas libstdc++ e libc++
+# divergem o bastante nos headers para gerar erro fantasma.
+NEOPZ_CXX           = "/opt/local/bin/g++"
+TIMEOUT_COMPILACAO  = 60   # s — uma TU leva ~0,5 s; isto é guarda contra travar
+MAX_ERROS_RELATADOS = 5    # o compilador cascateia; o 7b não precisa de 40 linhas
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -764,6 +795,231 @@ def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set) -> lis
     if not methods_whitelist:
         return []
     return find_suspicious_method_calls(codigo, methods_whitelist, whitelist)
+
+
+# ── Compilação do código gerado (validação semântica) ─────────────────────────
+#
+# Fluxo: resposta → blocos de código → TU sintética → g++ -fsyntax-only →
+# diagnósticos FILTRADOS. O filtro é a peça crítica: a resposta do assistente
+# quase nunca é um .cpp completo, e um trecho solto deixa de compilar por
+# motivos legítimos (variável definida "acima", sem main). Sem filtro, o
+# pipeline entraria em retry à toa e ficaria PIOR do que sem compilar.
+
+# Só blocos de C++: ```bash / ```cmake não casam porque a linguagem, quando
+# presente, tem que ser uma das listadas (o \s*\n depois não come 'bash').
+_BLOCO_CODIGO_RE = re.compile(r"```(?:cpp|c\+\+|cxx|cc|c)?[ \t]*\n(.*?)```",
+                              re.DOTALL | re.IGNORECASE)
+_INCLUDE_LINHA_RE = re.compile(r'^\s*#\s*include\s*[<"]')
+_MAIN_RE          = re.compile(r'\bint\s+main\s*\(')
+# Definição em nível de topo: função (sem indentação, assinatura terminando em
+# '{'), classe, struct ou template. Envolver isso num main não compilaria —
+# C++ não aceita função aninhada.
+#
+# O separador antes do nome é [\s\*&], não \s: em `TPZGeoMesh *CriaMalha(int)`
+# o '*' cola no nome e não há espaço ali. Mesma armadilha que já tinha deixado
+# 136 métodos reais invisíveis para o regex de `Tipo *Nome(...)` no cpp_parser.
+_DEF_TOPO_RE = re.compile(
+    r'^(?:template\s*<|class\s+\w|struct\s+\w|namespace\s+\w'
+    r'|[A-Za-z_][\w:<>,\s\*&]*[\s\*&][A-Za-z_]\w*\s*\([^;{}]*\)\s*(?:const\s*)?\{)',
+    re.MULTILINE)
+
+
+def _extrair_blocos_codigo(resposta: str) -> str:
+    """
+    Junta os blocos ```cpp da resposta na ordem em que aparecem — na prática
+    são pedaços do MESMO programa (malha, depois material, depois análise), e
+    compilá-los juntos é a reconstrução mais fiel do que o aluno vai montar.
+    Retorna "" quando não há bloco de código (resposta em prosa).
+    """
+    return "\n".join(b.strip() for b in _BLOCO_CODIGO_RE.findall(resposta) if b.strip())
+
+
+def _montar_tu(codigo: str) -> str:
+    """
+    Monta uma unidade de tradução compilável a partir de um trecho.
+
+    Três casos, porque envolver tudo num main daria erro em dois deles:
+      1. já tem main            → usa como está
+      2. define função/classe   → mantém no topo e acrescenta um main vazio
+      3. só sentenças soltas    → envolve num main
+
+    Includes sempre sobem para o topo (o modelo às vezes os repete no meio do
+    texto) e são deduplicados.
+    """
+    includes, corpo = [], []
+    for linha in codigo.splitlines():
+        (includes if _INCLUDE_LINHA_RE.match(linha) else corpo).append(linha)
+
+    vistos, incs = set(), []
+    for inc in includes:
+        chave = inc.strip()
+        if chave not in vistos:
+            vistos.add(chave)
+            incs.append(chave)
+
+    corpo_txt = "\n".join(corpo).strip("\n")
+    if _MAIN_RE.search(corpo_txt):
+        return "\n".join(incs + ["", corpo_txt, ""])
+    if _DEF_TOPO_RE.search(corpo_txt):
+        return "\n".join(incs + ["", corpo_txt, "", "int main() { return 0; }", ""])
+    return "\n".join(incs + ["", "int main() {", corpo_txt, "    return 0;", "}", ""])
+
+
+# Diagnósticos que DENUNCIAM ALUCINAÇÃO — o código pede algo que o NeoPZ não
+# oferece. Cada padrão existe nas duas redações (g++ e clang) porque a
+# instalação do laboratório usa g++ mas ninguém garante isso em outra máquina.
+_DIAG_ALUCINACAO = (
+    re.compile(r"has no member named"),                      # g++
+    re.compile(r"no member named '[^']+' in"),               # clang
+    re.compile(r"is not a member of"),
+    re.compile(r"no matching function for call to '[^']*TPZ"),
+    re.compile(r"no matching constructor for initialization of '[^']*TPZ"),  # clang
+    re.compile(r"No such file or directory"),                # include errado
+    re.compile(r"file not found"),                           # clang, idem
+    re.compile(r"'TPZ\w+' was not declared in this scope"),
+    re.compile(r"'TPZ\w+' does not name a type"),
+    re.compile(r"unknown type name 'TPZ\w+'"),               # clang
+    re.compile(r"use of undeclared identifier 'TPZ\w+'"),    # clang
+)
+
+# Linha de diagnóstico do compilador: "arquivo:linha:coluna: error: mensagem"
+_LINHA_ERRO_RE = re.compile(
+    r'^[^\n]*?:\d+:(?:\d+:)?\s*(?:fatal\s+)?error:\s*(.+)$', re.MULTILINE)
+
+
+def _erro_denuncia_alucinacao(mensagem: str) -> bool:
+    """
+    Separa o erro que acusa API inexistente do erro que é só artefato do
+    recorte. O critério é conservador de propósito: na dúvida, ARTEFATO.
+    Deixar passar uma alucinação mantém o comportamento de hoje; inventar uma
+    alucinação gasta retry e piora a resposta.
+
+    Por isso 'x was not declared in this scope' só conta quando o nome é TPZ —
+    variável não declarada é o sintoma normal de um trecho que referencia algo
+    definido "acima", fora do que o modelo colou.
+    """
+    return any(p.search(mensagem) for p in _DIAG_ALUCINACAO)
+
+
+def _neopz_prefix():
+    """
+    Raiz da instalação do NeoPZ (a que contém lib/cmake/neopz/), ou None.
+    NEOPZ_PREFIX no ambiente sobrescreve — útil para apontar para a instalação
+    que casa com a branch/índice em uso.
+    """
+    env = os.environ.get("NEOPZ_PREFIX")
+    candidatas = [Path(env)] if env else list(NEOPZ_PREFIXES)
+    for c in candidatas:
+        if (c / "lib" / "cmake" / "neopz" / "NeoPZTargets.cmake").is_file():
+            return c
+    return None
+
+
+def _compilador_disponivel():
+    """Caminho do compilador C++, ou None. NEOPZ_CXX no ambiente sobrescreve."""
+    for cand in (os.environ.get("NEOPZ_CXX"), NEOPZ_CXX, "g++", "c++"):
+        if not cand:
+            continue
+        caminho = shutil.which(cand) if not os.path.isabs(cand) else (
+            cand if os.path.exists(cand) else None)
+        if caminho:
+            return caminho
+    return None
+
+
+_INCLUDE_FLAGS_CACHE = {}
+_INTERFACE_INCLUDES_RE = re.compile(
+    r'INTERFACE_INCLUDE_DIRECTORIES\s+"([^"]+)"')
+
+
+def _include_flags(prefix: Path) -> list:
+    """
+    Os -I EXATOS que a instalação propaga, lidos do NeoPZTargets.cmake — a
+    mesma lista que o CMake daria a quem faz target_link_libraries(NeoPZ::pz).
+
+    Não é detalhe: a lista expõe `Material` mas NÃO `Material/Poisson`, e é
+    justamente por isso que o include correto é "Poisson/TPZMatPoisson.h" e o
+    basename sozinho não compila (ver _include_para_header). Um atalho tentador
+    aqui — passar -I de todo subdiretório — faria o include ERRADO compilar,
+    apagando uma das quatro classes de erro que a compilação existe para pegar.
+    """
+    chave = str(prefix)
+    if chave not in _INCLUDE_FLAGS_CACHE:
+        alvos = prefix / "lib" / "cmake" / "neopz" / "NeoPZTargets.cmake"
+        casado = _INTERFACE_INCLUDES_RE.search(alvos.read_text(encoding="utf-8"))
+        if not casado:
+            return []
+        dirs = [d.replace("${_IMPORT_PREFIX}", str(prefix))
+                for d in casado.group(1).split(";") if d.strip()]
+        _INCLUDE_FLAGS_CACHE[chave] = [f"-I{d}" for d in dirs if Path(d).is_dir()]
+    return _INCLUDE_FLAGS_CACHE[chave]
+
+
+def _compilar_codigo(resposta: str, timeout: int = TIMEOUT_COMPILACAO) -> dict:
+    """
+    Compila (só sintaxe/semântica, sem link) o código de uma resposta.
+
+    Retorna dict com:
+      status: 'ok'           — compilou limpo
+              'erros'        — não compilou E há erro que denuncia alucinação
+              'inconclusivo' — não compilou, mas só por artefato do recorte
+              'sem_codigo'   — resposta em prosa, nada a compilar
+              'indisponivel' — sem instalação do NeoPZ ou sem compilador
+              'timeout'      — estourou o tempo
+      erros:     mensagens filtradas (as que denunciam alucinação)
+      ignorados: quantos diagnósticos foram descartados como artefato
+
+    'indisponivel' é o caminho normal para quem instalou pelo Caminho A do
+    README (cópia completa, sem NeoPZ compilado) — nunca é falha de validação.
+    """
+    codigo = _extrair_blocos_codigo(resposta)
+    if not codigo.strip():
+        return {"status": "sem_codigo", "erros": [], "ignorados": 0}
+
+    prefix = _neopz_prefix()
+    compilador = _compilador_disponivel()
+    if prefix is None or compilador is None:
+        motivo = ("instalação do NeoPZ não encontrada" if prefix is None
+                  else "compilador C++ não encontrado")
+        return {"status": "indisponivel", "erros": [], "ignorados": 0, "motivo": motivo}
+
+    flags_include = _include_flags(prefix)
+    if not flags_include:
+        # NeoPZTargets.cmake existe mas não expõe a lista esperada — compilar
+        # com include path inventado daria diagnóstico errado, então é melhor
+        # não compilar do que compilar torto.
+        return {"status": "indisponivel", "erros": [], "ignorados": 0,
+                "motivo": "include path da instalação não pôde ser lido"}
+
+    tu = _montar_tu(codigo)
+    with tempfile.TemporaryDirectory() as tmp:
+        fonte = Path(tmp) / "gerado.cpp"
+        fonte.write_text(tu, encoding="utf-8")
+        cmd = [compilador, "-fsyntax-only", "-std=gnu++17", "-w",
+               f"-fmax-errors={MAX_ERROS_RELATADOS * 2}",
+               *flags_include, str(fonte)]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return {"status": "timeout", "erros": [], "ignorados": 0}
+
+    if proc.returncode == 0:
+        return {"status": "ok", "erros": [], "ignorados": 0}
+
+    mensagens = _LINHA_ERRO_RE.findall(proc.stderr)
+    relevantes, ignorados = [], 0
+    for msg in mensagens:
+        msg = msg.strip()
+        if _erro_denuncia_alucinacao(msg):
+            if msg not in relevantes:
+                relevantes.append(msg)
+        else:
+            ignorados += 1
+
+    if not relevantes:
+        return {"status": "inconclusivo", "erros": [], "ignorados": ignorados}
+    return {"status": "erros", "erros": relevantes[:MAX_ERROS_RELATADOS],
+            "ignorados": ignorados}
 
 
 # Cutoffs de confiança para substituição AUTOMÁTICA (sem depender do LLM

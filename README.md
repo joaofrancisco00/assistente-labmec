@@ -114,34 +114,33 @@ não compilava (ver `header_index/report.txt`).
 
 ### Estado da verificação das receitas
 
-⚠️ As receitas em `reference_solutions/` foram compiladas e executadas contra
-o NeoPZ de **2022**. Contra o `develop` elas foram conferidas **por nome e
-assinatura, não recompiladas**:
+✅ As quatro receitas em `reference_solutions/` foram recompiladas e
+**executadas** contra o NeoPZ do `develop` (`~/opt/neopz-develop`,
+`852a5116c`) — deixou de ser verificação por nome/assinatura e passou a ser
+o binário rodando de verdade (commit `d83f80d`):
 
-- todas as classes, includes e métodos que elas usam ainda existem no
-  `develop` (o único nome que sumiu, `TPZMatLaplacian`, aparece só num
-  comentário do `poisson.cpp`);
-- `TPZMatPoisson.h` e `TPZMixedDarcyFlow.h` não mudaram uma linha entre as
-  duas revisões;
-- as assinaturas chamadas continuam compatíveis — `TPZElasticity2D(...)` e
-  `SetElasticity(...)` idênticas; `BuildMultiphysicsSpace` ganhou um `const`
-  num parâmetro, que é compatível para quem chama.
+- as 4 compilam sem um único aviso e rodam com `exit 0`, gerando VTK;
+- a receita de elasticidade (`task_04_elasticidade2d`) tinha um bug real que
+  só **execução** pega — não compilação, não validação de nomes: em 2022 o
+  construtor completo `TPZElasticity2D(id, E, nu, fx, fy, planestress)` tinha
+  corpo vazio, e a receita orientava usar `(id)` + `SetElasticity(...)`. No
+  `develop` esse construtor foi consertado e passou a ser o ÚNICO que
+  inicializa a lei constitutiva — a recomendação antiga virou o erro. Falha
+  silenciosa: compila limpo, roda com `exit 0`, grava VTK, e `SigmaX`/`SigmaY`
+  saem **identicamente zero** nos 1152 pontos verificados (contra ±0,1477 e
+  ±0,4434 com o construtor completo). Nem `TPZElasticity2D` nem
+  `SetElasticity` são alucinação — nenhuma checagem de nome pegaria isso. A
+  receita, o espelho em `wiki_neopz/`, o catálogo de materiais e o check
+  `construtor_completo` do `eval_benchmark.py` foram invertidos para o padrão
+  certo;
+- `venv/bin/python eval_benchmark.py` roda **35/35** contra o `develop`
+  (`logs/eval_20260805_203353.json`).
 
-A receita de Darcy H1 (`task_06_darcy_h1`) é a mais sólida das quatro nesta
-branch: foi compilada e executada contra a instalação de 2022 **e** o que ela
-usa (`TPZDarcyFlow(id, dim)`, `SetConstantPermeability`, e os nomes
-`"Pressure"`/`"Flux"` do `VariableIndex`) foi conferido linha a linha nas
-**duas** revisões — são idênticos.
-
-A evidência é forte, mas **não substitui compilar**. Pendências antes de
-considerar esta branch verificada de ponta a ponta:
-
-1. Build e instalação do NeoPZ a partir do `develop`.
-2. Recompilar as receitas (ver "Compilando as receitas") — em especial
-   conferir `_include_para_header` em `pipeline.py`, que codifica quais
-   diretórios a instalação propaga como include path; se o `develop` mudou
-   esse layout, os `#include` injetados saem errados.
-3. `venv/bin/python eval_benchmark.py`.
+O que fica de fato em aberto não é desta migração — é estrutural: "compilou e
+rodou" garante que o C++ é válido, não que o resultado físico está certo. A
+elasticidade só foi pega porque alguém comparou `SigmaX`/`SigmaY` com o valor
+esperado à mão; não existe hoje checagem automática de plausibilidade física
+por família de problema.
 
 ## Estrutura
 
@@ -185,6 +184,27 @@ cmake --build reference_solutions/build -j4
 Ajuste `NeoPZ_DIR` para a instalação local do NeoPZ. **Use o mesmo compilador
 que compilou o NeoPZ** (no laboratório: g++ do MacPorts) — misturar g++ e
 clang dá erro de link por incompatibilidade de biblioteca padrão.
+
+## Checagem de compilação no pipeline (experimental)
+
+Se houver uma instalação do NeoPZ compilada na máquina, `pipeline.py` pode
+compilar (só sintaxe/semântica, sem gerar binário) o código C++ que o modelo
+produz — pega erro que a whitelist de nomes não pega: método de outra classe,
+assinatura errada, include sem o prefixo certo. Ainda não está ligado ao
+loop de retry; hoje é só a função `_compilar_codigo` em `pipeline.py`, testada
+em `tests/test_compilacao.py`.
+
+Por padrão procura a instalação em `~/opt/neopz-develop` ou `/opt/neopz`
+(nessa ordem) e o compilador em `/opt/local/bin/g++`. Se a sua instalação
+está em outro lugar, aponte com variáveis de ambiente:
+
+```bash
+export NEOPZ_PREFIX=/caminho/onde/instalou/neopz   # a raiz com lib/cmake/neopz/
+export NEOPZ_CXX=/caminho/do/compilador             # o MESMO que compilou o NeoPZ
+```
+
+Sem NeoPZ instalado (Caminho A da instalação, cópia completa) a checagem
+fica desligada em silêncio — nada muda no comportamento atual.
 
 ## Solução de problemas
 
