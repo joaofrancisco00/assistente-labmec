@@ -532,6 +532,7 @@ def _montar_prompt(
     includes_por_classe: dict = None,
     metodos_suspeitos: list = None,
     methods_whitelist: set = None,
+    erros_compilacao: list = None,
     classes_contexto: set = None,
     renames: dict = None,
     historico: list = None,
@@ -615,6 +616,21 @@ def _montar_prompt(
             "\n\n⚠️ MÉTODOS INVENTADOS:\n"
             + "\n".join(linhas_met)
             + "\nNÃO use um método só porque parece lógico — confira nas declarações de classe do contexto."
+        )
+
+    # Erros do COMPILADOR — o único bloco desta função que não é sugestão:
+    # os outros dizem "provavelmente errado" (semelhança de string, whitelist
+    # global); estes são a resposta do g++ sobre ESTE código. Vêm por último
+    # de propósito: quando existem, são o motivo real do retry.
+    if erros_compilacao:
+        instrucao_correcao += (
+            "\n\n❌ O COMPILADOR (g++) RECUSOU O CÓDIGO ANTERIOR:\n"
+            + "\n".join(f"  - {e}" for e in erros_compilacao)
+            + "\nCada linha acima é uma API que NÃO existe do jeito que você escreveu.\n"
+            "Atenção a 'has no member named X in Y' / 'no member named X': o método X\n"
+            "NÃO pertence à classe Y — mesmo que exista em OUTRA classe do NeoPZ.\n"
+            "Use somente os métodos que aparecem na declaração da própria classe,\n"
+            "no contexto acima. Não troque o método por outro 'parecido' sem conferir."
         )
 
     if instrucao_correcao:
@@ -1047,6 +1063,27 @@ def _compilar_codigo(resposta: str, timeout: int = TIMEOUT_COMPILACAO) -> dict:
             "ignorados": ignorados}
 
 
+_CLASSE_EM_DIAGNOSTICO_RE = re.compile(r"\bTPZ\w+")
+
+
+def _classes_citadas_em_erros(erros: list, whitelist: set) -> set:
+    """
+    Classes TPZ que aparecem nos diagnósticos do compilador — usadas para
+    reforçar o contexto do retry.
+
+    É o caso em que o reforço mais importa: "'class TPZDarcyFlow' has no member
+    named 'SetElasticity'" identifica a classe cuja DECLARAÇÃO o modelo precisa
+    ver para acertar (a whitelist global de métodos não sabe dizer isso). O
+    filtro pela whitelist descarta o ruído do g++ (`TPZVec<...>` de mensagem de
+    template instanciada, nome truncado) — buscar chunk de nome inexistente só
+    poluiria o contexto.
+    """
+    citadas = set()
+    for msg in erros:
+        citadas.update(_CLASSE_EM_DIAGNOSTICO_RE.findall(msg))
+    return {c for c in citadas if c in whitelist} if whitelist else citadas
+
+
 # Cutoffs de confiança para substituição AUTOMÁTICA (sem depender do LLM
 # aceitar a sugestão) — mais altos que os usados só para SUGERIR no prompt
 # (0.6 em _sugerir_correcoes / 0.5 em _validar_includes), porque aqui o texto
@@ -1284,6 +1321,11 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
             "alucinacoes":           resultado["alucinacoes"],
             "includes_errados":      sorted(resultado["includes"].keys()),
             "metodos_suspeitos":     [f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]],
+            # Status da compilação + os erros: é o registro de quais alucinações
+            # SÓ o compilador pegou — a lista que diz quais receitas escrever
+            # em seguida (ver Curadoria no README).
+            "compilacao":            resultado.get("compilacao", {}).get("status", "nao_executada"),
+            "erros_compilacao":      resultado.get("compilacao", {}).get("erros", []),
             "classes_legado":        resultado.get("classes_legado", []),
             "fontes":                sorted(resultado["fontes"]),
         }
@@ -1327,7 +1369,8 @@ def gerar_codigo(
     """
     Executa o pipeline completo:
     recuperação (1x) → formatação → geração → correção determinística →
-    validação → retry com contexto reforçado, se necessário.
+    validação de nomes → COMPILAÇÃO → retry com contexto reforçado, se
+    necessário.
 
     historico: pares (pergunta, resposta) das trocas anteriores — dá contexto
     a follow-ups no prompt e na recuperação.
@@ -1345,7 +1388,38 @@ def gerar_codigo(
     includes_errados = None
     includes_por_classe = None
     metodos_suspeitos = None
+    erros_compilacao = None
+    compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
     correcoes_automaticas = []
+    classes_legado_usadas = []
+    nomes_ok = False
+
+    # Plano B: a PRIMEIRA tentativa com nomes limpos que só reprovou na
+    # compilação. Existe por causa de uma regressão que plugar a compilação
+    # criaria: antes, tentativa com nomes limpos era devolvida na hora; agora
+    # ela vira insumo de retry, e sem esta rede a resposta final poderia ser
+    # uma tentativa POSTERIOR e PIOR (com classe alucinada). Só é usada nesse
+    # caso — se a última tentativa também tiver nomes limpos, ela fica, porque
+    # viu os erros do compilador no prompt. "Menos erros de compilador" não
+    # entra no critério: o g++ cascateia e a contagem não é ordem confiável.
+    melhor = None
+
+    def _resultado(valido: bool) -> dict:
+        """Empacota o estado ATUAL do loop. Lê as variáveis acima no momento
+        da chamada — por isso `melhor` guarda o dict pronto, não a intenção."""
+        return {
+            "resposta":             resposta,
+            "valido":               valido,
+            "alucinacoes":          classes_alucinadas or [],
+            "includes":             includes_errados or {},
+            "includes_por_classe":  includes_por_classe or {},
+            "metodos_suspeitos":    metodos_suspeitos or [],
+            "compilacao":           compilacao,
+            "classes_legado":       classes_legado_usadas,
+            "correcoes_automaticas": correcoes_automaticas,
+            "fontes":               set(fontes),
+            "tentativas":           tentativa,
+        }
 
     # 1. Recupera documentos relevantes — FORA do loop: a busca é determinística
     #    para a mesma pergunta, então repeti-la a cada retry só gastava
@@ -1377,6 +1451,7 @@ def gerar_codigo(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
             classes_alucinadas, includes_errados, includes_por_classe,
             metodos_suspeitos, methods_whitelist,
+            erros_compilacao=erros_compilacao,
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
             renames=renames,
             historico=historico,
@@ -1447,21 +1522,55 @@ def gerar_codigo(
         # LEGACY_CLASSES_FILE; um falso "alucinação" aqui seria pior que o aviso)
         classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
 
-        if not classes_alucinadas and not includes_errados and not includes_por_classe and not metodos_suspeitos:
-            print("  ✅ Nomes verificados — classes, headers e métodos existem no NeoPZ "
-                  "(semântica e assinaturas não são checadas)")
-            return {
-                "resposta":             resposta,
-                "valido":               True,
-                "alucinacoes":          [],
-                "includes":             {},
-                "includes_por_classe":  {},
-                "metodos_suspeitos":    [],
-                "classes_legado":       classes_legado_usadas,
-                "correcoes_automaticas": correcoes_automaticas,
-                "fontes":               fontes,
-                "tentativas":           tentativa,
-            }
+        nomes_ok = not (classes_alucinadas or includes_errados
+                        or includes_por_classe or metodos_suspeitos)
+
+        # 5.5 COMPILAÇÃO — a confirmação por CLASSE que a validação de nomes não
+        #     dá. A whitelist de métodos é global de propósito (ver
+        #     METHODS_WHITELIST_FILE), então `mat->SetElasticity(E, nu)` num
+        #     TPZDarcyFlow chegava aqui aprovado: SetElasticity existe — em
+        #     TPZElasticity2D. Era o selo "✅ Nomes verificados" cobrindo código
+        #     que não compila. O g++ responde a pergunta certa ("existe NESTA
+        #     classe, com ESTA assinatura") em ~0,5 s.
+        #
+        #     Só roda quando os nomes já estão limpos: é exatamente onde o
+        #     pipeline ia carimbar e devolver. Com nome alucinado o retry já
+        #     está decidido, e os diagnósticos seriam cascata do mesmo erro.
+        #
+        #     Só o status 'erros' reprova. 'inconclusivo' (erro que é artefato
+        #     do recorte), 'indisponivel' (sem NeoPZ compilado — o Caminho A do
+        #     README) e 'timeout' mantêm o comportamento de hoje: a ausência de
+        #     compilador nunca pode virar reprovação.
+        compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
+        erros_compilacao = None
+        if nomes_ok and tem_codigo:
+            _emitir(on_evento, "status", "🛠️ Compilando o código gerado...")
+            compilacao = _compilar_codigo(resposta)
+            if compilacao["status"] == "erros":
+                erros_compilacao = compilacao["erros"]
+                print(f"  ❌ O compilador recusou o código: {'; '.join(erros_compilacao)}")
+                _emitir(on_evento, "status",
+                        "❌ O compilador recusou o código: " + "; ".join(erros_compilacao))
+            elif compilacao["status"] == "inconclusivo":
+                print(f"  ℹ️  Compilação inconclusiva — {compilacao['ignorados']} diagnóstico(s) "
+                      "tratados como artefato do recorte, nenhum acusa API inexistente")
+            elif compilacao["status"] == "timeout":
+                print(f"  ⚠️  Compilação estourou {TIMEOUT_COMPILACAO}s — ignorada")
+            # 'indisponivel' é silencioso de propósito (ver README)
+
+        if nomes_ok and not erros_compilacao:
+            if compilacao["status"] == "ok":
+                print("  ✅ Compilado — o g++ aceitou o código: classes, métodos e assinaturas "
+                      "existem de verdade (o resultado físico continua não verificado)")
+            else:
+                print("  ✅ Nomes verificados — classes, headers e métodos existem no NeoPZ "
+                      "(semântica e assinaturas não são checadas)")
+            return _resultado(True)
+
+        # Nomes limpos + compilação reprovada: guarda como plano B antes de
+        # gastar o retry (ver comentário de `melhor`).
+        if nomes_ok and melhor is None:
+            melhor = _resultado(False)
 
         if classes_alucinadas:
             print(f"  ⚠️  Classes não encontradas: {', '.join(classes_alucinadas)}")
@@ -1500,6 +1609,11 @@ def gerar_codigo(
                 pass
         for cls, _metodo in metodos_suspeitos or []:
             classes_reforco.add(cls)
+        # Classe acusada pelo COMPILADOR: em "'class TPZDarcyFlow' has no member
+        # named 'SetElasticity'" a declaração que falta ao modelo é a de
+        # TPZDarcyFlow — mandar "não use SetElasticity" sem mostrar quais
+        # métodos a classe TEM é pedir para ele chutar de novo.
+        classes_reforco |= _classes_citadas_em_erros(erros_compilacao or [], whitelist)
         classes_reforco -= {d.metadata.get("classe", "") for d in h_docs}
 
         extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)
@@ -1514,21 +1628,18 @@ def gerar_codigo(
             ))
             print(f"  📚 Contexto reforçado com declarações de: {nomes}")
 
-        _emitir(on_evento, "status", "↩️ Problemas de validação detectados — corrigindo e gerando de novo...")
+        motivo = ("Compilação reprovada" if erros_compilacao
+                  else "Problemas de validação detectados")
+        _emitir(on_evento, "status", f"↩️ {motivo} — corrigindo e gerando de novo...")
         print("  ↩️  Corrigindo na próxima tentativa...")
 
-    return {
-        "resposta":             resposta,
-        "valido":               False,
-        "alucinacoes":          classes_alucinadas or [],
-        "includes":             includes_errados or {},
-        "includes_por_classe":  includes_por_classe or {},
-        "metodos_suspeitos":    metodos_suspeitos or [],
-        "classes_legado":       classes_legado_usadas,
-        "correcoes_automaticas": correcoes_automaticas,
-        "fontes":               fontes,
-        "tentativas":           tentativa,
-    }
+    # Esgotou as tentativas. `melhor` (nomes limpos, só a compilação reprovou)
+    # ganha da última tentativa quando esta chegou a alucinar nome — ver o
+    # comentário de `melhor` lá em cima.
+    if melhor is not None and not nomes_ok:
+        print("  ↩️  Devolvendo a melhor tentativa (nomes limpos, compilação reprovada).")
+        return melhor
+    return _resultado(False)
 
 
 # ── Loop de conversa ───────────────────────────────────────────────────────────
@@ -1601,6 +1712,10 @@ def main():
         if resultado["metodos_suspeitos"]:
             metodos_fmt = ", ".join(f"{c}::{m}" for c, m in resultado["metodos_suspeitos"])
             print(f"⚠️  Métodos não encontrados no NeoPZ (whitelist global): {metodos_fmt}")
+        if resultado["compilacao"]["erros"]:
+            print("❌ O compilador recusou o código (erro que a checagem de nomes não pega):")
+            for e in resultado["compilacao"]["erros"]:
+                print(f"   - {e}")
         if resultado["classes_legado"]:
             dicas = [
                 f"{c} → prefira {renames[c]}" if c in renames else c
@@ -1608,8 +1723,10 @@ def main():
             ]
             print(f"⚠️  API antiga ({'/'.join(DIRS_LEGADO)}) usada: {', '.join(dicas)}")
             print("   Essas classes existem, mas são do legado — prefira a API atual do NeoPZ")
-        if (not resultado["alucinacoes"] and not resultado["includes"]
-                and not resultado["includes_por_classe"] and not resultado["metodos_suspeitos"]):
+        if resultado["valido"] and resultado["compilacao"]["status"] == "ok":
+            print("✅ Compilado: o g++ aceitou o código — classes, métodos e assinaturas existem de verdade")
+            print("   (compilar NÃO verifica o resultado físico — confira se o material/formulação é o adequado ao problema)")
+        elif resultado["valido"]:
             print("✅ Nomes verificados: classes, headers e métodos existem no NeoPZ")
             print("   (semântica e assinaturas NÃO são checadas — confira se o material/método é o adequado ao problema)")
 

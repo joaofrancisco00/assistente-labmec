@@ -71,8 +71,15 @@ venv/bin/python pipeline.py
 ```
 
 O rodapé de cada resposta mostra o resultado da validação:
-`✅ Nomes verificados` significa que classes/headers/métodos **existem** no
-NeoPZ — semântica e assinaturas **não** são checadas; revise antes de usar.
+
+- `✅ Compilado` — o g++ aceitou o código: classes, métodos e **assinaturas**
+  existem de verdade. Exige NeoPZ instalado (ver
+  [Checagem de compilação no pipeline](#checagem-de-compilação-no-pipeline));
+- `✅ Nomes verificados` — classes/headers/métodos **existem** no NeoPZ, mas
+  semântica e assinaturas **não** foram checadas;
+- `❌ O compilador recusou o código` — vem com a mensagem crua do g++.
+
+Nenhum dos selos verifica o **resultado físico**; revise antes de usar.
 
 ## Qual NeoPZ esta branch valida
 
@@ -185,14 +192,40 @@ Ajuste `NeoPZ_DIR` para a instalação local do NeoPZ. **Use o mesmo compilador
 que compilou o NeoPZ** (no laboratório: g++ do MacPorts) — misturar g++ e
 clang dá erro de link por incompatibilidade de biblioteca padrão.
 
-## Checagem de compilação no pipeline (experimental)
+## Checagem de compilação no pipeline
 
-Se houver uma instalação do NeoPZ compilada na máquina, `pipeline.py` pode
-compilar (só sintaxe/semântica, sem gerar binário) o código C++ que o modelo
-produz — pega erro que a whitelist de nomes não pega: método de outra classe,
-assinatura errada, include sem o prefixo certo. Ainda não está ligado ao
-loop de retry; hoje é só a função `_compilar_codigo` em `pipeline.py`, testada
-em `tests/test_compilacao.py`.
+Se houver uma instalação do NeoPZ compilada na máquina, o pipeline **compila**
+(só sintaxe/semântica, sem gerar binário) o código C++ que o modelo produz,
+dentro do loop de validação. É o que fecha o buraco da whitelist de métodos,
+que é **global** de propósito (não sabe a qual classe cada método pertence):
+
+```
+mat->SetElasticity(2.e3, 0.3);   // num TPZDarcyFlow
+```
+
+`SetElasticity` existe — em `TPZElasticity2D`. A validação de nomes aprovava e
+carimbava `✅ Nomes verificados`. O g++ recusa em ~0,5 s, e o erro volta no
+prompt da tentativa seguinte junto com a declaração da classe acusada.
+
+Como entra no loop:
+
+- só roda quando a validação de nomes já passou (é onde o selo seria dado) e a
+  resposta tem código de fato;
+- **só erro que denuncia API inexistente reprova** (método fora da classe,
+  assinatura errada, header que não resolve, tipo não declarado). Erro que é
+  artefato do recorte — variável definida "acima", trecho sem `main` — sai como
+  `inconclusivo` e não gasta retry;
+- reprovou, o retry recebe as mensagens do compilador e as declarações das
+  classes citadas nelas; se as tentativas acabarem, volta a melhor delas com o
+  erro do compilador no rodapé, sem selo;
+- passou, o selo sobe para `✅ Compilado` — classes, métodos e assinaturas
+  existem de verdade. **Compilar não verifica o resultado físico** (ver o bug
+  de elasticidade em [Estado da verificação](#estado-da-verificação-das-receitas)).
+
+Medida nas 8 respostas já registradas em `logs/interacoes.jsonl`, todas
+carimbadas `✅ Nomes verificados` na época: 4 são reprovadas pelo compilador —
+construtor `TPZElasticity3D(id, dim)` inexistente, `PushBack` num
+`TPZAdmChunkVector` (existe em outra classe), e dois includes que não resolvem.
 
 Por padrão procura a instalação em `~/opt/neopz-develop` ou `/opt/neopz`
 (nessa ordem) e o compilador em `/opt/local/bin/g++`. Se a sua instalação
@@ -203,8 +236,9 @@ export NEOPZ_PREFIX=/caminho/onde/instalou/neopz   # a raiz com lib/cmake/neopz/
 export NEOPZ_CXX=/caminho/do/compilador             # o MESMO que compilou o NeoPZ
 ```
 
-Sem NeoPZ instalado (Caminho A da instalação, cópia completa) a checagem
-fica desligada em silêncio — nada muda no comportamento atual.
+Sem NeoPZ instalado (Caminho A da instalação, cópia completa) a checagem fica
+desligada em silêncio: o loop volta a validar só nomes e o selo volta a ser
+`✅ Nomes verificados`. **Falta de compilador nunca reprova uma resposta.**
 
 ## Solução de problemas
 

@@ -61,9 +61,9 @@ def _rodape(resultado: dict) -> str:
     if resultado["correcoes_automaticas"]:
         linhas.append("🔧 **Correções automáticas**: " + ", ".join(resultado["correcoes_automaticas"]))
 
-    problemas = (resultado["alucinacoes"] or list(resultado["includes"].keys())
-                 or resultado["includes_por_classe"] or resultado["metodos_suspeitos"])
-    if problemas:
+    compilacao = resultado.get("compilacao", {"status": "nao_executada", "erros": []})
+
+    if not resultado["valido"]:
         if resultado["alucinacoes"]:
             linhas.append("⚠️ **Classes não verificadas**: " + ", ".join(resultado["alucinacoes"]))
         if resultado["includes"]:
@@ -74,6 +74,15 @@ def _rodape(resultado: dict) -> str:
         if resultado["metodos_suspeitos"]:
             linhas.append("⚠️ **Métodos não encontrados**: " + ", ".join(
                 f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]))
+        # Erro de compilador é o único que a checagem de nomes não pega (método
+        # de outra classe, assinatura errada) — vale mostrar a mensagem crua,
+        # que diz exatamente onde está o problema
+        if compilacao["erros"]:
+            linhas.append("❌ **O compilador recusou o código**:\n" + "\n".join(
+                f"- `{e}`" for e in compilacao["erros"]))
+    elif compilacao["status"] == "ok":
+        linhas.append("✅ **Compilado** — o g++ aceitou o código: classes, métodos e "
+                      "assinaturas existem de verdade (o resultado físico não é verificado)")
     else:
         linhas.append("✅ **Nomes verificados** — classes, headers e métodos existem no NeoPZ "
                       "(semântica e assinaturas não são checadas)")

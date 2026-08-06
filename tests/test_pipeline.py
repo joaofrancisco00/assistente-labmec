@@ -3,11 +3,14 @@ Testes das funções puras de validação/correção do pipeline (sem LLM/Chroma
 
 Rodar:  python3 -m unittest discover -s tests -v
 """
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -351,6 +354,148 @@ class TestDeteccaoDeCodigo(unittest.TestCase):
         self.assertTrue(pipeline._resposta_contem_codigo("```cpp\nint main() {}\n```"))
         self.assertTrue(pipeline._resposta_contem_codigo(
             "TPZGeoMesh *gmesh = new TPZGeoMesh();"))
+
+
+class _DBFalso:
+    """Banco vetorial que não devolve nada — o que interessa nestes testes é o
+    LOOP (validação → compilação → retry), não a recuperação."""
+    def max_marginal_relevance_search(self, *a, **kw):
+        return []
+
+    def similarity_search(self, *a, **kw):
+        return []
+
+
+class _LLMFalso:
+    """Devolve respostas pré-programadas, uma por tentativa (repete a última se
+    acabarem), e guarda os prompts recebidos para inspeção."""
+    def __init__(self, *respostas):
+        self.respostas = list(respostas)
+        self.prompts = []
+
+    def stream(self, prompt):
+        self.prompts.append(prompt)
+        yield self.respostas[min(len(self.prompts) - 1, len(self.respostas) - 1)]
+
+
+class TestCompilacaoNoLoop(unittest.TestCase):
+    """
+    A compilação plugada em gerar_codigo — a confirmação POR CLASSE que a
+    whitelist global de métodos não dá.
+
+    Cenário-base (real, de tests/test_compilacao.py): SetElasticity existe no
+    NeoPZ — em TPZElasticity2D. Chamado num TPZDarcyFlow, passa por todas as
+    checagens de NOME e ia embora carimbado "✅ Nomes verificados". Aqui
+    `_compilar_codigo` é dublê: o loop é o objeto do teste, não o g++ (a
+    compilação de verdade tem cobertura em tests/test_compilacao.py e exige
+    NeoPZ instalado).
+    """
+    RESPOSTA_QUE_NAO_COMPILA = (
+        "Segue o material de Darcy:\n\n```cpp\n"
+        '#include "DarcyFlow/TPZDarcyFlow.h"\n'
+        "TPZDarcyFlow *mat = new TPZDarcyFlow(1, 2);\n"
+        "mat->SetElasticity(2.e3, 0.3);\n```\n"
+    )
+    RESPOSTA_COM_CLASSE_INVENTADA = (
+        "Agora vai:\n\n```cpp\n"
+        '#include "DarcyFlow/TPZDarcyFlow.h"\n'
+        "TPZCoisaQueNaoExiste *mat = nullptr;\n```\n"
+    )
+    ERRO_GPP = ["'class TPZDarcyFlow' has no member named 'SetElasticity'"]
+
+    def _gerar(self, llm):
+        """gerar_codigo com o mínimo para o loop rodar. methods_whitelist
+        contém SetElasticity de propósito: é o ponto do teste que a validação
+        de nomes APROVA a chamada."""
+        db = _DBFalso()
+        with redirect_stdout(io.StringIO()):
+            return pipeline.gerar_codigo(
+                "material de darcy", llm, db, db,
+                whitelist={"TPZDarcyFlow"},
+                headers_whitelist={"TPZDarcyFlow.h"},
+                system_base="sistema",
+                methods_whitelist={"SetElasticity"},
+            )
+
+    def test_nomes_aprovam_o_que_o_compilador_reprova(self):
+        llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
+        with patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "erros", "erros": self.ERRO_GPP, "ignorados": 0}):
+            r = self._gerar(llm)
+        # A validação de nomes não achou nada — era exatamente assim que o
+        # selo saía em cima de código que não compila
+        self.assertEqual(r["alucinacoes"], [])
+        self.assertEqual(r["metodos_suspeitos"], [])
+        # ...e agora o resultado NÃO é válido, com o erro do compilador junto
+        self.assertFalse(r["valido"])
+        self.assertEqual(r["compilacao"]["erros"], self.ERRO_GPP)
+        # gastou as tentativas tentando corrigir
+        self.assertEqual(r["tentativas"], pipeline.MAX_RETRIES + 1)
+
+    def test_erro_do_compilador_volta_no_prompt_do_retry(self):
+        llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
+        with patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "erros", "erros": self.ERRO_GPP, "ignorados": 0}):
+            self._gerar(llm)
+        self.assertNotIn("COMPILADOR", llm.prompts[0])       # 1ª tentativa: nada a corrigir
+        self.assertIn("COMPILADOR", llm.prompts[1])
+        self.assertIn("has no member named 'SetElasticity'", llm.prompts[1])
+
+    def test_compilacao_ok_vira_selo_mais_forte(self):
+        llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
+        with patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "ok", "erros": [], "ignorados": 0}):
+            r = self._gerar(llm)
+        self.assertTrue(r["valido"])
+        self.assertEqual(r["compilacao"]["status"], "ok")
+        self.assertEqual(r["tentativas"], 1)
+
+    def test_sem_neopz_instalado_nada_muda(self):
+        # O caso de quem instalou pelo Caminho A do README: sem compilador, a
+        # checagem some em silêncio. Se este teste falhar, plugar a compilação
+        # virou REGRESSÃO para a maioria dos usuários.
+        for status in ("indisponivel", "inconclusivo", "timeout"):
+            with self.subTest(status=status):
+                llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
+                with patch.object(pipeline, "_compilar_codigo",
+                                  return_value={"status": status, "erros": [], "ignorados": 2}):
+                    r = self._gerar(llm)
+                self.assertTrue(r["valido"])
+                self.assertEqual(r["tentativas"], 1)
+
+    def test_prosa_nao_e_compilada(self):
+        llm = _LLMFalso("A classe TPZDarcyFlow representa o escoamento em meio poroso.")
+        with patch.object(pipeline, "_compilar_codigo") as compilar:
+            r = self._gerar(llm)
+        compilar.assert_not_called()
+        self.assertTrue(r["valido"])
+
+    def test_retry_pior_nao_apaga_a_melhor_tentativa(self):
+        # A regressão que plugar a compilação poderia criar: antes, a tentativa
+        # com nomes limpos era devolvida na hora; agora ela vira insumo de
+        # retry. Se as seguintes alucinarem, é ELA que tem de voltar.
+        llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA, self.RESPOSTA_COM_CLASSE_INVENTADA)
+        with patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "erros", "erros": self.ERRO_GPP, "ignorados": 0}):
+            r = self._gerar(llm)
+        self.assertIn("TPZDarcyFlow", r["resposta"])
+        self.assertNotIn("TPZCoisaQueNaoExiste", r["resposta"])
+        self.assertEqual(r["alucinacoes"], [])
+        self.assertEqual(r["compilacao"]["erros"], self.ERRO_GPP)
+
+
+class TestClassesCitadasEmErros(unittest.TestCase):
+    def test_classe_do_diagnostico_vira_reforco(self):
+        erros = ["'class TPZDarcyFlow' has no member named 'SetElasticity'"]
+        self.assertEqual(
+            pipeline._classes_citadas_em_erros(erros, {"TPZDarcyFlow", "TPZGeoMesh"}),
+            {"TPZDarcyFlow"})
+
+    def test_ruido_de_template_fora_da_whitelist_e_descartado(self):
+        # g++ despeja tipos instanciados na mensagem; buscar chunk de nome que
+        # não existe na whitelist só poluiria o contexto do retry
+        erros = ["no matching function for call to 'TPZVecInexistente<double>::Resize()'"]
+        self.assertEqual(pipeline._classes_citadas_em_erros(erros, {"TPZDarcyFlow"}), set())
 
 
 if __name__ == "__main__":
