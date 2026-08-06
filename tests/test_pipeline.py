@@ -37,6 +37,32 @@ class TestValidacaoDeIncludes(unittest.TestCase):
                          ["pzcmesh.h"])
 
 
+class TestValidacaoDeIncludesPorClasse(unittest.TestCase):
+    # Regressão do bug achado pela checagem de compilação (05/08/2026):
+    # _validar_includes_por_classe comparava presença pelo BASENAME, então
+    # "TPZMatPoisson.h" contava como igual a "Poisson/TPZMatPoisson.h" — a
+    # forma sem prefixo de família passava validada e não compilava.
+    # Atingia 187 das 847 classes do índice (Poisson, DarcyFlow, Elasticity,
+    # Plasticity, Projection, ConsLaw, Electromagnetics, needrefactor).
+    INDICE = {"TPZMatPoisson": "Material/Poisson/TPZMatPoisson.h",
+              "TPZGeoMesh": "Mesh/pzgmesh.h"}
+
+    def test_include_sem_prefixo_de_familia_e_flagado(self):
+        codigo = '#include "TPZMatPoisson.h"\nTPZMatPoisson<> *m = nullptr;'
+        problemas = pipeline._validar_includes_por_classe(codigo, self.INDICE, {})
+        self.assertEqual(problemas, {"TPZMatPoisson": "Poisson/TPZMatPoisson.h"})
+
+    def test_include_com_prefixo_de_familia_passa(self):
+        codigo = '#include "Poisson/TPZMatPoisson.h"\nTPZMatPoisson<> *m = nullptr;'
+        self.assertEqual(pipeline._validar_includes_por_classe(codigo, self.INDICE, {}), {})
+
+    def test_classe_sem_prefixo_necessario_nao_e_afetada(self):
+        # TPZGeoMesh não precisa de prefixo — basename continua a forma certa,
+        # não pode virar falso positivo
+        codigo = '#include "pzgmesh.h"\nTPZGeoMesh *g = nullptr;'
+        self.assertEqual(pipeline._validar_includes_por_classe(codigo, self.INDICE, {}), {})
+
+
 class TestCorrecaoAutomatica(unittest.TestCase):
     def test_classe_quase_certa_e_corrigida(self):
         # Regressão: TPZGeomMeshTools (inventado) repetido em 3 tentativas
@@ -89,6 +115,24 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         )
         self.assertIn('#include "Poisson/TPZMatPoisson.h"', corrigido)
         self.assertNotIn('#include "TPZMatPoisson.h"', corrigido)
+
+    def test_include_sem_prefixo_e_reescrito_no_lugar(self):
+        # Regressão do bug de basename (ver TestValidacaoDeIncludesPorClasse):
+        # quando o include ERRADO já está presente, a correção precisa
+        # REESCREVER a linha, não só injetar uma segunda — duas linhas com o
+        # mesmo basename ainda dariam "No such file or directory" na errada
+        codigo = ('#include "TPZMatPoisson.h"\n'
+                  'TPZMatPoisson<STATE> *m = new TPZMatPoisson<STATE>(1, 2);\n')
+        corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
+            codigo,
+            {"TPZMatPoisson": "Material/Poisson/TPZMatPoisson.h"},
+            {},
+            {"TPZMatPoisson.h"},
+        )
+        self.assertEqual(corrigido.count("#include"), 1)
+        self.assertIn('#include "Poisson/TPZMatPoisson.h"', corrigido)
+        self.assertEqual(correcoes,
+                         ['TPZMatPoisson: #include "TPZMatPoisson.h" → "Poisson/TPZMatPoisson.h"'])
 
     def test_chute_estilo_pz_e_removido(self):
         # Regressão real (capturada pelo eval): ao explicar TPZInt1d o modelo

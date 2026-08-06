@@ -709,6 +709,22 @@ def _extrair_includes(codigo: str, apenas_aspas: bool = False) -> list:
     return [Path(inc).name for inc in regex.findall(codigo)]
 
 
+def _includes_com_caminho(codigo: str) -> dict:
+    """
+    basename -> caminho exatamente como escrito no #include (ex:
+    'TPZMatPoisson.h' -> 'Poisson/TPZMatPoisson.h', ou -> 'TPZMatPoisson.h'
+    se o aluno/modelo escreveu sem o prefixo de família). Repetido, fica a
+    ÚLTIMA ocorrência.
+
+    Diferente de _extrair_includes: aqui o caminho NÃO é reduzido ao
+    basename, porque para headers da API nova (ver _include_para_header) o
+    basename sozinho parece presente mas não é o arquivo que compila —
+    "TPZMatPoisson.h" e "Poisson/TPZMatPoisson.h" têm o mesmo basename e são
+    includes DIFERENTES para o compilador.
+    """
+    return {Path(inc).name: inc for inc in _INCLUDE_RE.findall(codigo)}
+
+
 def _validar_includes(codigo: str, headers_whitelist: set) -> dict:
     """
     Verifica os #include .h contra a whitelist de headers reais.
@@ -757,13 +773,21 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
     possível forçar um único automaticamente).
 
     Retorna {classe: header_correto} para as classes cujo header certo está
-    faltando — dict vazio = tudo OK.
+    faltando OU presente na forma ERRADA — dict vazio = tudo OK.
+
+    BUG CORRIGIDO (achado pela checagem de compilação, ver README): a versão
+    anterior checava presença pelo BASENAME, então "TPZMatPoisson.h" contava
+    como igual a "Poisson/TPZMatPoisson.h" — a forma sem prefixo de família
+    passava validada e não compilava. Atingia 187 das 847 classes do índice
+    (Poisson, DarcyFlow, Elasticity, Plasticity, Projection, ConsLaw,
+    Electromagnetics, needrefactor) — 5 de 8 respostas reais logadas em
+    logs/interacoes.jsonl caíam nisso, todas carimbadas "✅ Nomes verificados".
     """
     if not class_header_index:
         return {}
 
     usadas = find_tpz_classes_in_code(codigo)
-    includes_atuais = set(_extrair_includes(codigo))
+    includes_atuais = _includes_com_caminho(codigo)
 
     faltando = {}
     for classe in usadas:
@@ -772,10 +796,11 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
         caminho = class_header_index.get(classe)
         if not caminho:
             continue  # classe fora do índice (pode ser nova ou não-TPZ)
-        # Presença checada pelo BASENAME (o aluno pode ter escrito a forma
-        # qualificada ou não); a forma sugerida é a compilável
-        if Path(caminho).name not in includes_atuais:
-            faltando[classe] = _include_para_header(caminho)
+        forma_certa = _include_para_header(caminho)
+        # Exige a forma COMPILÁVEL exata, não só o basename presente em
+        # algum #include — ver docstring acima e _includes_com_caminho.
+        if includes_atuais.get(Path(caminho).name) != forma_certa:
+            faltando[classe] = forma_certa
     return faltando
 
 
@@ -1144,8 +1169,10 @@ def _corrigir_includes_automaticamente(
     1. Remove includes "lixo" conhecidos (ex: "NeoPZ.h") e includes "chutados"
        (<NomeDaClasse>.h) que não existem na whitelist real de headers.
     2. Para cada classe TPZ usada no código que está no índice determinístico
-       (e não é ambígua/collision), garante que o #include correto está
-       presente — injetando-o se estiver faltando.
+       (e não é ambígua/collision), garante que o #include CORRETO está
+       presente: injeta se estiver faltando, ou REESCREVE a linha existente
+       se ela usa uma forma que não compila (ex: "TPZMatPoisson.h" sem o
+       prefixo de família — ver _include_para_header e _includes_com_caminho).
 
     Retorna (codigo_corrigido, lista_de_correcoes_aplicadas).
     """
@@ -1153,8 +1180,8 @@ def _corrigir_includes_automaticamente(
         return codigo, []
 
     usadas = find_tpz_classes_in_code(codigo)
-    # classe -> caminho completo do índice (a forma compilável do include é
-    # derivada por _include_para_header; presença é checada pelo basename)
+    # classe -> caminho completo do índice; a forma compilável é derivada por
+    # _include_para_header (pode exigir prefixo de família — não é o basename)
     necessarios = {
         classe: class_header_index[classe]
         for classe in usadas
@@ -1164,11 +1191,12 @@ def _corrigir_includes_automaticamente(
     linhas = codigo.split("\n")
 
     def _includes_atuais(linhas: list) -> dict:
+        """basename -> (índice da linha, caminho exatamente como escrito)"""
         atuais = {}
         for i, linha in enumerate(linhas):
             m = re.search(r'#include\s*[<"]([^>"]+\.h)[>"]', linha)
             if m:
-                atuais.setdefault(Path(m.group(1)).name, i)
+                atuais.setdefault(Path(m.group(1)).name, (i, m.group(1)))
         return atuais
 
     atuais = _includes_atuais(linhas)
@@ -1187,7 +1215,7 @@ def _corrigir_includes_automaticamente(
         if base.startswith("tpz"):
             candidatos_chute.add(f"pz{base[3:]}.h")
     linhas_remover = {
-        idx for nome, idx in atuais.items()
+        idx for nome, (idx, _caminho) in atuais.items()
         if nome.lower() in INCLUDES_LIXO_CONHECIDOS
         or (nome.lower() in candidatos_chute and nome not in headers_whitelist)
     }
@@ -1198,23 +1226,41 @@ def _corrigir_includes_automaticamente(
         return "\n".join(linhas), []
 
     atuais = _includes_atuais(linhas)
-    faltando = {c: caminho for c, caminho in necessarios.items()
-                if Path(caminho).name not in atuais}
-    if not faltando:
-        return "\n".join(linhas), []
+    faltando   = {}  # classe -> forma certa: não há include NENHUM para essa classe
+    a_corrigir = {}  # classe -> (índice, caminho errado, forma certa): include
+                     # presente, mas na forma que não compila (BUG corrigido —
+                     # ver README e _validar_includes_por_classe: a versão
+                     # anterior comparava por basename e deixava passar
+                     # "TPZMatPoisson.h" como se fosse "Poisson/TPZMatPoisson.h")
+    for c, caminho in necessarios.items():
+        forma_certa = _include_para_header(caminho)
+        presente = atuais.get(Path(caminho).name)
+        if presente is None:
+            faltando[c] = forma_certa
+        elif presente[1] != forma_certa:
+            a_corrigir[c] = (presente[0], presente[1], forma_certa)
 
-    posicoes_include = [i for i, l in enumerate(linhas) if re.match(r'\s*#include\b', l)]
-    ultimo_include_idx = max(posicoes_include, default=-1)
+    correcoes = []
+    for c, (idx, caminho_errado, forma_certa) in a_corrigir.items():
+        padrao_linha = re.compile(r'(#include\s*[<"])' + re.escape(caminho_errado) + r'([>"])')
+        nova_linha, n = padrao_linha.subn(r'\g<1>' + forma_certa + r'\g<2>', linhas[idx], count=1)
+        if n:
+            linhas[idx] = nova_linha
+            correcoes.append(f'{c}: #include "{caminho_errado}" → "{forma_certa}"')
 
-    novas = [f'#include "{_include_para_header(caminho)}"'
-             for caminho in sorted({str(c) for c in faltando.values()})]
-    if ultimo_include_idx >= 0:
-        linhas = linhas[:ultimo_include_idx + 1] + novas + linhas[ultimo_include_idx + 1:]
-    else:
-        linhas = novas + linhas
+    if faltando:
+        posicoes_include = [i for i, l in enumerate(linhas) if re.match(r'\s*#include\b', l)]
+        ultimo_include_idx = max(posicoes_include, default=-1)
 
-    correcoes = [f'{c}: + #include "{_include_para_header(caminho)}"'
-                 for c, caminho in faltando.items()]
+        novas = [f'#include "{forma_certa}"'
+                 for forma_certa in sorted(set(faltando.values()))]
+        if ultimo_include_idx >= 0:
+            linhas = linhas[:ultimo_include_idx + 1] + novas + linhas[ultimo_include_idx + 1:]
+        else:
+            linhas = novas + linhas
+
+        correcoes += [f'{c}: + #include "{forma_certa}"' for c, forma_certa in faltando.items()]
+
     return "\n".join(linhas), correcoes
 
 
