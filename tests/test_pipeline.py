@@ -119,6 +119,24 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         self.assertIn('#include "Poisson/TPZMatPoisson.h"', corrigido)
         self.assertNotIn('#include "TPZMatPoisson.h"', corrigido)
 
+    def test_injecao_cai_dentro_do_bloco_de_codigo(self):
+        # Resposta SEM include nenhum: o header injetado ia para o topo do
+        # texto, antes da cerca ```cpp. Ficava visível na prosa e — o que
+        # importa — _extrair_blocos_codigo não o via, então o g++ compilava
+        # sem include e acusava "não declarado" numa classe que existe
+        resposta = ("Segue o material:\n\n```cpp\n"
+                    "TPZMatPoisson<STATE> *m = new TPZMatPoisson<STATE>(1, 2);\n"
+                    "```\n")
+        corrigido, _ = pipeline._corrigir_includes_automaticamente(
+            resposta,
+            {"TPZMatPoisson": "Material/Poisson/TPZMatPoisson.h"},
+            {},
+            {"TPZMatPoisson.h"},
+        )
+        self.assertIn('#include "Poisson/TPZMatPoisson.h"',
+                      pipeline._extrair_blocos_codigo(corrigido))
+        self.assertNotIn("#include", corrigido.split("```")[0])
+
     def test_include_sem_prefixo_e_reescrito_no_lugar(self):
         # Regressão do bug de basename (ver TestValidacaoDeIncludesPorClasse):
         # quando o include ERRADO já está presente, a correção precisa
@@ -230,6 +248,29 @@ class TestDespriorizacaoDeLegado(unittest.TestCase):
         ]
         ordenados = pipeline._despriorizar_legado(docs)
         self.assertEqual([d.page_content for d in ordenados], ["b", "d", "a", "c"])
+
+    def test_teste_e_benchmark_tambem_vao_para_o_fim(self):
+        # UnitTest_PZ/Publications/PerfUtil compilam e são código vivo, mas o
+        # CMake os monta com add_executable() — nunca entram na libpz. Como
+        # exemplo de uso ensinariam a montar um teste unitário, não um problema
+        # de FEM, e são 852 dos 5984 chunks da coleção de exemplos
+        from langchain_core.documents import Document
+        docs = [
+            Document(page_content="a", metadata={"source": "UnitTest_PZ/TestDeRham/TPZMatDeRhamH1.cpp"}),
+            Document(page_content="b", metadata={"source": "Material/Poisson/TPZMatPoisson.h"}),
+            Document(page_content="c", metadata={"source": "Publications/hdiv3dpaper201504.h"}),
+            Document(page_content="d", metadata={"source": "Mesh/pzcmesh.h"}),
+        ]
+        ordenados = pipeline._despriorizar_legado(docs)
+        self.assertEqual([d.page_content for d in ordenados], ["b", "d", "a", "c"])
+
+    def test_etiqueta_casa_por_componente_do_caminho(self):
+        # A versão anterior casava por SUBSTRING: 'PerfUtil' dentro da string
+        # marcaria como benchmark um 'Util/PerfUtilTimer.h', que é API real
+        self.assertEqual(pipeline._fora_da_api("Util/PerfUtilTimer.h"), "")
+        self.assertEqual(pipeline._fora_da_api("PerfUtil/pzcpudetect.h"), "teste/benchmark")
+        self.assertEqual(pipeline._fora_da_api("Material/needrefactor/REAL/pzburger.h"), "legado")
+        self.assertEqual(pipeline._fora_da_api("Mesh/pzcmesh.h"), "")
 
 
 class TestLogDeInteracoes(unittest.TestCase):
@@ -482,6 +523,112 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         self.assertNotIn("TPZCoisaQueNaoExiste", r["resposta"])
         self.assertEqual(r["alucinacoes"], [])
         self.assertEqual(r["compilacao"]["erros"], self.ERRO_GPP)
+
+
+class TestClasseForaDaInstalacao(unittest.TestCase):
+    """
+    Classe que EXISTE no NeoPZ mas cujo header a instalação não tem.
+
+    O índice classe→header é montado a partir da pasta do CÓDIGO-FONTE; a
+    compilação roda contra a BIBLIOTECA INSTALADA. 238 das 847 classes do
+    índice estão numa e não na outra, e o pipeline tratava a diferença como
+    culpa do modelo: injetava o include certo-no-source, o g++ respondia
+    "No such file or directory", _erro_denuncia_alucinacao lia isso como
+    alucinação — dois retries queimados e resposta sem selo, por uma classe
+    que existe de verdade.
+    """
+    BURGER = {"TPZBurger": "Material/needrefactor/REAL/pzburger.h"}
+    CODIGO = "int main() { TPZBurger *m = new TPZBurger(1, 2); }\n"
+
+    def setUp(self):
+        pipeline._INDISPONIVEL_CACHE.clear()
+
+    tearDown = setUp
+
+    def test_dir_fora_do_build_dispensa_instalacao(self):
+        # needrefactor/ não é citado em nenhum CMakeLists do NeoPZ (develop e
+        # 2022): é fato da revisão, não da máquina — vale mesmo sem NeoPZ
+        # instalado, que é o Caminho A do README
+        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+            self.assertEqual(pipeline._motivo_indisponivel(self.BURGER["TPZBurger"]),
+                             "não faz parte do build do NeoPZ")
+            self.assertIsNone(pipeline._motivo_indisponivel("Mesh/pzgmesh.h"))
+
+    def test_sonda_responde_pela_instalacao_desta_maquina(self):
+        # Plasticidade é opção de build (BUILD_PLASTICITY_MATERIALS): as MESMAS
+        # classes existem na instalação de quem ligou a flag e faltam na de quem
+        # não ligou. Por isso a resposta vem de sondar a instalação — uma lista
+        # gravada no repo mentiria em metade das máquinas.
+        caminho = "Material/Plasticity/TPZMatElastoPlastic.h"
+        with tempfile.TemporaryDirectory() as tmp:
+            inc = Path(tmp) / "include" / "Material"
+            (inc / "Plasticity").mkdir(parents=True)
+            with patch.object(pipeline, "_neopz_prefix", return_value=Path(tmp)), \
+                 patch.object(pipeline, "_include_flags", return_value=[f"-I{inc}"]):
+                self.assertEqual(pipeline._motivo_indisponivel(caminho),
+                                 "não está nesta instalação do NeoPZ")
+                pipeline._INDISPONIVEL_CACHE.clear()
+                (inc / "Plasticity" / "TPZMatElastoPlastic.h").write_text("")
+                self.assertIsNone(pipeline._motivo_indisponivel(caminho))
+
+    def test_include_impossivel_nao_e_injetado(self):
+        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+            corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
+                self.CODIGO, self.BURGER, {}, {"pzburger.h"})
+        self.assertNotIn("#include", corrigido)
+        self.assertEqual(correcoes, [])
+
+    def test_include_impossivel_nao_e_exigido(self):
+        # Exigir dispararia retry a cada tentativa, sem nunca poder ser atendido
+        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+            self.assertEqual(
+                pipeline._validar_includes_por_classe(self.CODIGO, self.BURGER, {}), {})
+
+    def test_classe_inutilizavel_nao_e_destino_de_correcao(self):
+        # A whitelist responde "existe no NeoPZ" e por isso mantém TPZBurger —
+        # mas ela também é a lista de DESTINOS da correção determinística, e o
+        # chute 'TPZBurguer' era reescrito para uma classe que não compila em
+        # máquina nenhuma, com selo de "corrigido automaticamente" junto
+        codigo = "int main() { TPZBurguer *m = nullptr; }"
+        whitelist = {"TPZBurger", "TPZDarcyFlow"}
+        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+            destinos = pipeline._whitelist_utilizavel(whitelist, self.BURGER)
+            _, correcoes = pipeline._corrigir_classes_automaticamente(
+                codigo, whitelist, {}, destinos=destinos)
+        self.assertNotIn("TPZBurger", destinos)
+        self.assertIn("TPZDarcyFlow", destinos)   # classe utilizável fica
+        self.assertEqual(correcoes, [])           # sem destino, nome fica alucinado
+
+    def test_classe_fora_do_indice_continua_sendo_destino(self):
+        # Não saber onde a classe mora não é motivo para descartá-la: sem
+        # entrada no índice classe→header, ela segue disponível como destino
+        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+            destinos = pipeline._whitelist_utilizavel({"TPZClasseNova"}, self.BURGER)
+        self.assertEqual(destinos, {"TPZClasseNova"})
+
+    def test_loop_nao_acusa_alucinacao_nem_queima_retry(self):
+        llm = _LLMFalso("Segue:\n\n```cpp\nTPZBurger *mat = new TPZBurger(1, 2);\n```\n")
+        db = _DBFalso()
+        with patch.object(pipeline, "_neopz_prefix", return_value=None), \
+             patch.object(pipeline, "_compilar_codigo") as compilar, \
+             redirect_stdout(io.StringIO()):
+            r = pipeline.gerar_codigo(
+                "equação de convecção", llm, db, db,
+                whitelist={"TPZBurger"},
+                headers_whitelist={"pzburger.h"},
+                system_base="sistema",
+                class_header_index=self.BURGER,
+            )
+        # Sem o header, o g++ cospe "was not declared in this scope" para cada
+        # uso — diagnóstico que também está em _DIAG_ALUCINACAO. Compilar aqui
+        # só geraria acusação falsa em cascata.
+        compilar.assert_not_called()
+        self.assertEqual(r["compilacao"]["status"], "indisponivel")
+        self.assertEqual(r["tentativas"], 1)          # antes: MAX_RETRIES + 1
+        self.assertTrue(r["valido"])
+        self.assertEqual(r["alucinacoes"], [])
+        self.assertEqual(r["classes_indisponiveis"],
+                         {"TPZBurger": "não faz parte do build do NeoPZ"})
 
 
 class TestClassesCitadasEmErros(unittest.TestCase):

@@ -240,6 +240,83 @@ Sem NeoPZ instalado (Caminho A da instalação, cópia completa) a checagem fica
 desligada em silêncio: o loop volta a validar só nomes e o selo volta a ser
 `✅ Nomes verificados`. **Falta de compilador nunca reprova uma resposta.**
 
+### Classe que existe no NeoPZ mas não está instalada
+
+O índice classe→header é montado a partir da **pasta do código-fonte**; a
+compilação roda contra a **biblioteca instalada**. As duas não coincidem: das
+847 classes do índice, **238 têm um header que a instalação não expõe**. O
+pipeline tratava essa diferença como culpa do modelo — injetava o include
+certo-no-source, o g++ respondia `No such file or directory`, e isso conta como
+denúncia de alucinação: dois retries queimados e resposta sem selo, por uma
+classe que existe de verdade.
+
+Hoje essas classes são detectadas antes (`_classes_indisponiveis`): o include
+não é injetado nem exigido, a compilação é **pulada** (sem o header ela só
+produziria `was not declared in this scope` em cascata, que também seria lido
+como alucinação) e a resposta sai com o aviso
+`⚠️ Classe fora desta instalação do NeoPZ`. Não dispara retry — o modelo não
+errou, e insistir não faz aparecer um header que não está no disco.
+
+A indisponibilidade tem duas origens, e elas se apuram de formas diferentes:
+
+| Origem | Classes | Como é apurada |
+|---|---|---|
+| Fora do build do NeoPZ — `needrefactor/`, `PerfTests/`, `UnitTest_PZ/`, `Publications/`, `PerfUtil/` | 166 | Constante (`_DIRS_NUNCA_INSTALADOS`): nenhum `CMakeLists` os cita, nem no develop nem em 2022. Vale em **qualquer** máquina e não exige NeoPZ instalado |
+| Opção de build desligada — sobretudo `BUILD_PLASTICITY_MATERIALS` | 72 | **Sondagem** dos `-I` que a instalação local propaga. Depende da máquina: as mesmas classes existem para quem ligou a flag |
+
+A segunda linha é o motivo de a checagem ser sonda e não lista gravada — uma
+lista fixa no repositório mentiria em toda instalação compilada com outras
+flags.
+
+Essas classes **continuam na whitelist** — ela responde "esse nome existe no
+NeoPZ", e tirá-las de lá faria a pergunta explicativa "o que é `TPZBurger`?"
+(prosa sobre uma classe real) ser acusada de alucinação. O que elas perderam
+foi o papel de **destino**: a whitelist também alimenta a correção
+determinística de nomes, as sugestões no prompt e o reforço de contexto no
+retry, e reescrever o chute do modelo *para* uma classe que não compila troca
+um erro por outro pior — com selo de "corrigido automaticamente" em cima. Era
+o que acontecia: `TPZBurguer` → `TPZBurger` (needrefactor), `TPZMatDeRhamH1D` →
+`TPZMatDeRhamH1` (UnitTest_PZ). Nesta máquina o corte tira 180 das 658 classes
+da lista de destinos; correção legítima (`TPZMatPoissn` → `TPZMatPoisson`)
+segue funcionando.
+
+### Código de teste e benchmark no retrieval
+
+`UnitTest_PZ/`, `Publications/` e `PerfUtil/` são um caso diferente do legado:
+o código é **vivo e compila limpo** contra o NeoPZ de hoje. O que ele não é é
+API — o CMake o monta com `add_unit_test()`, que expande para
+`add_executable()`, nunca para `target_sources(pz)`. Vira binário de teste
+separado, e instalação nenhuma o expõe.
+
+O indexador exclui `needrefactor/`/`PerfTests/` do retrieval, mas esses três
+nunca entraram na regra: **852 dos 5984 chunks de exemplo** (14%) vêm deles.
+Medido no índice desta branch, a pergunta mais comum possível trazia código de
+artigo em primeiro lugar:
+
+```
+"como criar uma malha computacional com material de Poisson"
+  antes:  hdiv3dpaper201504.cpp, TPZHybridElasticity2D.cpp, hdivCurvedJCompAppMath.cpp, ...
+  depois: TPZHybridElasticity2D.cpp, pzgradientreconstruction.cpp, TPZAgglomerateEl.cpp, ...
+```
+
+Eles são **rebaixados, não excluídos** (`_despriorizar_legado`): para 10 classes
+(`TPZMatDeRham*`, `TPZSurface`, `TPZMatL2Product`,
+`TPZHybridPoissonCollapsed`) o header de teste é a única declaração no
+repositório inteiro, e apagá-la deixaria a pergunta explicativa sem contexto
+nenhum. Então ficam como reserva no fim do pool, atrás de qualquer chunk da API
+real — e quando aparecem na resposta, saem etiquetados
+(`ℹ️ Fontes de teste/benchmark`), porque um `TestDeRham.cpp` citado como
+"exemplo" ensina a montar um teste unitário, não um problema de FEM.
+
+O rebaixamento é **em tempo de consulta**, sobre a metadata `source` que já
+está no índice: **não é preciso reindexar** para essa mudança valer.
+
+`needrefactor/` merece nota à parte: além de não ser instalado, **não compila
+mais**. Seus `.cpp` incluem `pzbndcond.h`, que sumiu na refatoração de
+materiais, e pedem `HDivFamily::EDefault`, que não existe mais no enum. A única
+referência viva a ele no NeoPZ é um `#include` comentado em
+`SubStruct/tpzgensubstruct.cpp`. Não é um header a instalar — é código morto.
+
 ## Solução de problemas
 
 - **"Connection refused" / resposta não sai** — o Ollama não está rodando:

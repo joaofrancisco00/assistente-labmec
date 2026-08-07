@@ -302,16 +302,46 @@ def _boost_por_classe(docs: list, classes_citadas: set, metadata_key: str) -> li
 # precisa reforçar isso trazendo justamente esses chunks primeiro.
 _DIRS_LEGADO = ("needrefactor", "PerfTests")
 
+# Diretórios que NÃO são a biblioteca. Diferente do legado, é código VIVO: os
+# .cpp de UnitTest_PZ/TestDeRham compilam limpo contra o NeoPZ de hoje. O que
+# eles não são é API — o CMake os monta com add_unit_test(), que expande para
+# add_executable(), nunca para target_sources(pz). Viram binário de teste
+# separado; instalação nenhuma os expõe, com flag nenhuma ligada.
+#
+# Por que aqui e não excluídos no indexer como _DIRS_LEGADO: para 10 classes
+# (TPZMatDeRham*, TPZSurface, TPZMatL2Product, TPZHybridPoissonCollapsed) o
+# header de teste é a ÚNICA declaração no repositório inteiro — apagá-los
+# deixaria a pergunta explicativa sem contexto algum, pior que hoje. Ficam
+# como RESERVA: no fim do pool, atrás de qualquer chunk da API real, e
+# etiquetados na resposta (ver fontes_nao_api).
+_DIRS_NAO_API = ("UnitTest_PZ", "Publications", "PerfUtil")
+
+
+def _fora_da_api(source: str) -> str:
+    """
+    Etiqueta do que ESTE chunk é, ou "" quando é API instalável da biblioteca.
+
+    Casa por COMPONENTE do caminho, não por substring como antes: 'PerfUtil'
+    dentro de uma string casaria com um futuro 'Util/PerfUtilTimer.h', que é
+    API de verdade.
+    """
+    partes = Path(source).parts
+    if any(d in partes for d in _DIRS_LEGADO):
+        return "legado"
+    if any(d in partes for d in _DIRS_NAO_API):
+        return "teste/benchmark"
+    return ""
+
 
 def _despriorizar_legado(docs: list) -> list:
-    """Reordenação estável: empurra para o fim do pool os chunks vindos de
-    _DIRS_LEGADO. Eles continuam disponíveis (podem ser a única fonte de uma
+    """Reordenação estável: empurra para o fim do pool os chunks que não são da
+    API instalável — legado (_DIRS_LEGADO) e código de teste/benchmark
+    (_DIRS_NAO_API). Eles continuam disponíveis (podem ser a única fonte de uma
     classe), só perdem a prioridade para a API atual."""
-    atuais, legado = [], []
+    atuais, fora = [], []
     for doc in docs:
-        src = doc.metadata.get("source", "") or ""
-        (legado if any(d in src for d in _DIRS_LEGADO) else atuais).append(doc)
-    return atuais + legado
+        (fora if _fora_da_api(doc.metadata.get("source", "") or "") else atuais).append(doc)
+    return atuais + fora
 
 
 _PERGUNTA_EXPLICATIVA_RE = re.compile(
@@ -512,11 +542,46 @@ def _classes_do_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> set
 # ── Sugestões de correção (difflib) ──────────────────────────────────────────────
 
 def _sugerir_correcoes(alucinadas: list, whitelist: set, cutoff: float = 0.6) -> dict:
-    """Para cada item inexistente, busca os nomes reais mais parecidos."""
+    """Para cada item inexistente, busca os nomes reais mais parecidos.
+    Recebe a whitelist já filtrada para destinos utilizáveis quando isso
+    importa — ver _whitelist_utilizavel."""
     sugestoes = {}
     for item in alucinadas:
         sugestoes[item] = difflib.get_close_matches(item, whitelist, n=3, cutoff=cutoff)
     return sugestoes
+
+
+def _whitelist_utilizavel(whitelist: set, class_header_index: dict) -> set:
+    """
+    Subconjunto da whitelist que pode servir de DESTINO — de correção
+    automática, de sugestão no prompt e de reforço de contexto no retry.
+
+    São duas perguntas diferentes e a whitelist só responde a primeira:
+
+      "esse nome existe no NeoPZ?"     → precisa manter needrefactor e cia.,
+                                         senão "o que é TPZBurger?" (prosa
+                                         sobre classe real) vira acusação de
+                                         alucinação;
+      "posso mandar o modelo usar?"    → não, se o header não existe aqui.
+
+    Reescrever o chute do modelo PARA uma classe que não compila em máquina
+    nenhuma troca um erro por outro pior, ainda por cima carimbado "corrigido
+    automaticamente". Achado real ao conferir a whitelist desta branch:
+    'TPZBurguer' virava 'TPZBurger' (needrefactor) e 'TPZMatDeRhamH1D' virava
+    'TPZMatDeRhamH1' (UnitTest_PZ) — 180 das 658 classes eram destino assim.
+
+    Classe fora do índice classe→header fica: não saber onde ela mora não é
+    motivo para descartá-la. Sem índice nenhum, devolve a whitelist inteira
+    (comportamento anterior).
+    """
+    if not class_header_index:
+        return whitelist
+    utilizavel = set()
+    for classe in whitelist:
+        caminho = class_header_index.get(classe)
+        if caminho is None or not _motivo_indisponivel(caminho):
+            utilizavel.add(classe)
+    return utilizavel
 
 
 # ── Geração / prompt ─────────────────────────────────────────────────────────────
@@ -536,15 +601,23 @@ def _montar_prompt(
     classes_contexto: set = None,
     renames: dict = None,
     historico: list = None,
+    destinos: set = None,
 ) -> str:
     """
     Monta o prompt completo como string.
     Se houver classes alucinadas ou includes errados, adiciona instrução de correção.
+
+    destinos: whitelist filtrada para o que a instalação realmente tem (ver
+    _whitelist_utilizavel). É o que pode ser OFERECIDO ao modelo — sugerir uma
+    classe cujo header não existe aqui é mandá-lo escrever código que não
+    compila. Ausente, cai na whitelist inteira.
     """
+    destinos = whitelist if destinos is None else destinos
+
     # Lista de referência: classes presentes no contexto recuperado (relevantes
     # para esta pergunta). Cai para a whitelist global só se o contexto não
     # tiver nenhuma classe identificada.
-    referencia = classes_contexto or whitelist
+    referencia = classes_contexto or destinos
     classes_reais = ", ".join(sorted(referencia)[:40]) if referencia else "—"
 
     instrucao_correcao = ""
@@ -552,10 +625,10 @@ def _montar_prompt(
     # Correção de classes
     if classes_alucinadas:
         renames = renames or {}
-        sugestoes = _sugerir_correcoes(classes_alucinadas, whitelist)
+        sugestoes = _sugerir_correcoes(classes_alucinadas, destinos)
         linhas = []
         for classe, matches in sugestoes.items():
-            if classe in renames and renames[classe] in whitelist:
+            if classe in renames and renames[classe] in destinos:
                 linhas.append(
                     f"  - '{classe}' foi RENOMEADA no NeoPZ atual. Use '{renames[classe]}' no lugar."
                 )
@@ -778,6 +851,86 @@ def _include_para_header(caminho: str) -> str:
     return Path(caminho).name
 
 
+# Diretórios que existem no source do NeoPZ mas que instalação NENHUMA expõe.
+# Não é opção de build, é fato da revisão — conferido nos CMakeLists do develop
+# (852a5116c) E do 2022 (4c6b6d277):
+#   needrefactor/  não é citado em nenhum CMakeLists: não compila, não instala,
+#                  e os .cpp de lá nem compilam mais (incluem pzbndcond.h, que
+#                  sumiu na refatoração de materiais, e pedem
+#                  HDivFamily::EDefault, que não existe mais no enum). A única
+#                  referência viva no NeoPZ é um include COMENTADO em
+#                  SubStruct/tpzgensubstruct.cpp.
+#   os demais      são programas de teste/benchmark/companion de artigo, não a
+#                  biblioteca — não há o que instalar.
+# Vale em qualquer máquina, por isso é constante e não sonda.
+_DIRS_NUNCA_INSTALADOS = ("needrefactor", "PerfTests", "UnitTest_PZ",
+                          "Publications", "PerfUtil")
+
+_INDISPONIVEL_CACHE = {}
+
+
+def _motivo_indisponivel(caminho: str):
+    """
+    Por que o header dessa classe NÃO pode ser incluído aqui — ou None se pode.
+
+    São duas perguntas diferentes, nesta ordem:
+
+    1. UNIVERSAL — o diretório está em _DIRS_NUNCA_INSTALADOS? Então nenhuma
+       instalação do NeoPZ tem esse header, em máquina nenhuma. Responder isso
+       não exige NeoPZ instalado.
+    2. DESTA MÁQUINA — o include resolve contra os -I que a instalação daqui
+       propaga? Plasticidade é o caso típico: BUILD_PLASTICITY_MATERIALS é
+       opção de build, então as mesmas 72 classes existem na instalação de quem
+       ligou a flag e faltam na de quem não ligou. Por isso é SONDA e não lista
+       gravada — uma lista fixa mentiria em metade das instalações.
+
+    Sem NeoPZ instalado (Caminho A do README) só a pergunta 1 é respondível; a 2
+    devolve None e o comportamento fica igual ao de hoje.
+    """
+    if any(p in _DIRS_NUNCA_INSTALADOS for p in Path(caminho).parts[:-1]):
+        return "não faz parte do build do NeoPZ"
+
+    prefix = _neopz_prefix()
+    if prefix is None:
+        return None
+
+    chave = (str(prefix), caminho)
+    if chave not in _INDISPONIVEL_CACHE:
+        dirs = [Path(f[2:]) for f in _include_flags(prefix)]
+        if not dirs:
+            return None  # sem os -I da instalação não dá para afirmar nada
+        forma = _include_para_header(caminho)
+        _INDISPONIVEL_CACHE[chave] = (None if any((d / forma).is_file() for d in dirs)
+                                      else "não está nesta instalação do NeoPZ")
+    return _INDISPONIVEL_CACHE[chave]
+
+
+def _classes_indisponiveis(codigo: str, class_header_index: dict) -> dict:
+    """
+    {classe: motivo} das classes TPZ usadas no código que EXISTEM no NeoPZ mas
+    cujo header não pode ser incluído aqui (ver _motivo_indisponivel).
+
+    Existe porque o índice classe→header é montado a partir da PASTA DO
+    CÓDIGO-FONTE, enquanto a validação compila contra a BIBLIOTECA INSTALADA —
+    e 238 das 847 classes do índice estão numa e não na outra. Sem esta
+    checagem o pipeline injetava o include certo-no-source, o g++ respondia
+    "No such file or directory", _erro_denuncia_alucinacao lia isso como
+    alucinação, e o resultado era acusar o modelo por uma classe que existe de
+    verdade: dois retries queimados e resposta entregue sem selo.
+    """
+    if not class_header_index:
+        return {}
+    indisponiveis = {}
+    for classe in find_tpz_classes_in_code(codigo):
+        caminho = class_header_index.get(classe)
+        if not caminho:
+            continue
+        motivo = _motivo_indisponivel(caminho)
+        if motivo:
+            indisponiveis[classe] = motivo
+    return indisponiveis
+
+
 def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisions: dict) -> dict:
     """
     Verificação mais forte que _validar_includes(): para cada classe TPZ usada no
@@ -812,6 +965,10 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
         caminho = class_header_index.get(classe)
         if not caminho:
             continue  # classe fora do índice (pode ser nova ou não-TPZ)
+        if _motivo_indisponivel(caminho):
+            continue  # header existe no source, mas não aqui — exigir o
+                      # include seria pedir o impossível e disparar retry
+                      # eterno (ver _classes_indisponiveis)
         forma_certa = _include_para_header(caminho)
         # Exige a forma COMPILÁVEL exata, não só o basename presente em
         # algum #include — ver docstring acima e _includes_com_caminho.
@@ -1092,7 +1249,8 @@ CUTOFF_CLASSE_AUTOMATICA = 0.80
 CUTOFF_METODO_AUTOMATICO = 0.78
 
 
-def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict = None) -> tuple:
+def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict = None,
+                                      destinos: set = None) -> tuple:
     """
     Correção determinística de nomes de classe TPZ "quase certos" — mesmo
     princípio de _corrigir_includes_automaticamente, mas para o nome da
@@ -1125,6 +1283,10 @@ def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict
     if not alucinadas:
         return codigo, []
 
+    # Quem ENTRA na correção é medido pela whitelist inteira (a classe existe
+    # ou não); para onde ela SAI é medido pelos destinos utilizáveis — ver
+    # _whitelist_utilizavel.
+    destinos = whitelist if destinos is None else destinos
     renames = renames or {}
     correcoes = []
     for errada in alucinadas:
@@ -1134,11 +1296,11 @@ def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict
         # o certo era 'TPZMatPoisson' (string-distante, semanticamente certo).
         # Trava de segurança: só aplica se o destino existir na whitelist
         # (protege contra typo/entrada desatualizada no renames.json).
-        if errada in renames and renames[errada] in whitelist:
+        if errada in renames and renames[errada] in destinos:
             certa = renames[errada]
             sufixo = " [renomeação]"
         else:
-            candidatos = difflib.get_close_matches(errada, whitelist, n=1, cutoff=CUTOFF_CLASSE_AUTOMATICA)
+            candidatos = difflib.get_close_matches(errada, destinos, n=1, cutoff=CUTOFF_CLASSE_AUTOMATICA)
             if not candidatos:
                 continue
             certa = candidatos[0]
@@ -1269,7 +1431,14 @@ def _corrigir_includes_automaticamente(
                      # ver README e _validar_includes_por_classe: a versão
                      # anterior comparava por basename e deixava passar
                      # "TPZMatPoisson.h" como se fosse "Poisson/TPZMatPoisson.h")
-    for c, caminho in necessarios.items():
+    # Classe cujo header não existe NESTA instalação sai daqui: injetar o
+    # include certo-no-source garantiria "No such file or directory" no g++, e
+    # esse diagnóstico é lido como alucinação (ver _classes_indisponiveis). A
+    # remoção de chute acima continua valendo para ela — some o include
+    # inventado, e nenhum outro entra no lugar.
+    obtenivel = {c: cam for c, cam in necessarios.items()
+                 if not _motivo_indisponivel(cam)}
+    for c, caminho in obtenivel.items():
         forma_certa = _include_para_header(caminho)
         presente = atuais.get(Path(caminho).name)
         if presente is None:
@@ -1294,7 +1463,19 @@ def _corrigir_includes_automaticamente(
         if ultimo_include_idx >= 0:
             linhas = linhas[:ultimo_include_idx + 1] + novas + linhas[ultimo_include_idx + 1:]
         else:
-            linhas = novas + linhas
+            # Nenhum include na resposta: a inserção precisa cair DENTRO do
+            # bloco ```cpp. Colocar no topo do texto punha o header na prosa,
+            # antes da cerca — o usuário via um #include solto acima do "Segue:"
+            # e, pior, _extrair_blocos_codigo não o enxergava: o g++ recebia o
+            # código sem include e respondia "'TPZMatPoisson' was not declared
+            # in this scope", que _erro_denuncia_alucinacao lê como alucinação.
+            # Mesma acusação falsa de _classes_indisponiveis, por outra porta —
+            # e nesta o alvo é a API ATUAL, o caso comum.
+            abre_bloco = next((i for i, l in enumerate(linhas)
+                               if re.match(r'\s*```(?:cpp|c\+\+|cxx|cc|c)?[ \t]*$', l,
+                                           re.IGNORECASE)), None)
+            corte = abre_bloco + 1 if abre_bloco is not None else 0
+            linhas = linhas[:corte] + novas + linhas[corte:]
 
         correcoes += [f'{c}: + #include "{forma_certa}"' for c, forma_certa in faltando.items()]
 
@@ -1327,6 +1508,10 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
             "compilacao":            resultado.get("compilacao", {}).get("status", "nao_executada"),
             "erros_compilacao":      resultado.get("compilacao", {}).get("erros", []),
             "classes_legado":        resultado.get("classes_legado", []),
+            # Quais classes o índice ofereceu e a instalação não tinha: é a
+            # lista que diz o que vale exportar/religar no build do NeoPZ.
+            "classes_indisponiveis": resultado.get("classes_indisponiveis", {}),
+            "fontes_nao_api":        resultado.get("fontes_nao_api", []),
             "fontes":                sorted(resultado["fontes"]),
         }
         with caminho.open("a", encoding="utf-8") as f:
@@ -1384,6 +1569,11 @@ def gerar_codigo(
     renames = renames or {}
     legacy_classes = legacy_classes or set()
 
+    # Whitelist = "esse nome existe no NeoPZ". Destinos = "posso mandar o
+    # modelo usar" — o que a instalação de fato tem. Calculado uma vez por
+    # pergunta (a sonda por header é cacheada); ver _whitelist_utilizavel.
+    whitelist_destino = _whitelist_utilizavel(whitelist, class_header_index)
+
     classes_alucinadas = None
     includes_errados = None
     includes_por_classe = None
@@ -1392,6 +1582,7 @@ def gerar_codigo(
     compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
     correcoes_automaticas = []
     classes_legado_usadas = []
+    classes_indisponiveis = {}
     nomes_ok = False
 
     # Plano B: a PRIMEIRA tentativa com nomes limpos que só reprovou na
@@ -1416,6 +1607,13 @@ def gerar_codigo(
             "metodos_suspeitos":    metodos_suspeitos or [],
             "compilacao":           compilacao,
             "classes_legado":       classes_legado_usadas,
+            "classes_indisponiveis": classes_indisponiveis,
+            # Fontes que são código de teste/benchmark, não a biblioteca. Não
+            # some do rodapé disfarçado de exemplo de uso: 852 dos 5984 chunks
+            # de exemplo vêm daí, e um TestDeRham.cpp citado como "exemplo"
+            # ensina a montar um teste unitário, não um problema de FEM.
+            "fontes_nao_api":       sorted(f for f in fontes
+                                           if _fora_da_api(f) == "teste/benchmark"),
             "correcoes_automaticas": correcoes_automaticas,
             "fontes":               set(fontes),
             "tentativas":           tentativa,
@@ -1455,6 +1653,7 @@ def gerar_codigo(
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
             renames=renames,
             historico=historico,
+            destinos=whitelist_destino,
         )
 
         tokens_estimados = len(prompt) // 4  # ~4 chars/token p/ código + PT misto
@@ -1488,7 +1687,8 @@ def gerar_codigo(
         tem_codigo = _resposta_contem_codigo(resposta)
         correcoes_automaticas = []
         if tem_codigo:
-            resposta, correcoes_classes = _corrigir_classes_automaticamente(resposta, whitelist, renames)
+            resposta, correcoes_classes = _corrigir_classes_automaticamente(
+                resposta, whitelist, renames, destinos=whitelist_destino)
             correcoes_automaticas.extend(correcoes_classes)
 
             metodos_suspeitos_pre_correcao = _validar_metodos(resposta, methods_whitelist, whitelist)
@@ -1522,6 +1722,13 @@ def gerar_codigo(
         # LEGACY_CLASSES_FILE; um falso "alucinação" aqui seria pior que o aviso)
         classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
 
+        # Classe que existe no NeoPZ mas cujo header esta instalação não tem
+        # (ver _classes_indisponiveis). Como o legado: avisa, não bloqueia e não
+        # dispara retry — o modelo não errou, e insistir não faria aparecer um
+        # header que não está no disco.
+        classes_indisponiveis = (_classes_indisponiveis(resposta, class_header_index)
+                                 if tem_codigo else {})
+
         nomes_ok = not (classes_alucinadas or includes_errados
                         or includes_por_classe or metodos_suspeitos)
 
@@ -1541,9 +1748,22 @@ def gerar_codigo(
         #     do recorte), 'indisponivel' (sem NeoPZ compilado — o Caminho A do
         #     README) e 'timeout' mantêm o comportamento de hoje: a ausência de
         #     compilador nunca pode virar reprovação.
+        #
+        #     Código que usa classe indisponível não é compilável NEM em
+        #     princípio: sem o header, o g++ cospe "was not declared in this
+        #     scope" para cada uso dela — e esse diagnóstico também está em
+        #     _DIAG_ALUCINACAO. Compilar aqui só produziria acusação falsa em
+        #     cascata, então a compilação é pulada e o motivo real fica no
+        #     status (não é falha do modelo nem reprovação).
         compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
         erros_compilacao = None
-        if nomes_ok and tem_codigo:
+        if nomes_ok and tem_codigo and classes_indisponiveis:
+            fora = "; ".join(f"{c} ({m})" for c, m in sorted(classes_indisponiveis.items()))
+            compilacao = {"status": "indisponivel", "erros": [], "ignorados": 0,
+                          "motivo": f"código usa classe fora desta instalação: {fora}"}
+            print(f"  ⚠️  Compilação pulada — {compilacao['motivo']}")
+            _emitir(on_evento, "status", f"⚠️ Compilação pulada — {compilacao['motivo']}")
+        elif nomes_ok and tem_codigo:
             _emitir(on_evento, "status", "🛠️ Compilando o código gerado...")
             compilacao = _compilar_codigo(resposta)
             if compilacao["status"] == "erros":
@@ -1594,9 +1814,10 @@ def gerar_codigo(
         docs_semanticos = []
         for c in classes_alucinadas or []:
             # Renomeação conhecida tem prioridade (destino certo, determinístico)
-            if c in renames and renames[c] in whitelist:
+            if c in renames and renames[c] in whitelist_destino:
                 classes_reforco.add(renames[c])
-            classes_reforco.update(difflib.get_close_matches(c, whitelist, n=2, cutoff=0.6))
+            classes_reforco.update(
+                difflib.get_close_matches(c, whitelist_destino, n=2, cutoff=0.6))
             # Busca SEMÂNTICA além da string: o nome alucinado + a pergunta
             # descrevem o CONCEITO que o modelo procurava. difflib sozinho já
             # empurrou 'TPZMatLaplacian' (Poisson) para 'TPZMatPlaca2'
@@ -1723,6 +1944,17 @@ def main():
             ]
             print(f"⚠️  API antiga ({'/'.join(DIRS_LEGADO)}) usada: {', '.join(dicas)}")
             print("   Essas classes existem, mas são do legado — prefira a API atual do NeoPZ")
+        if resultado.get("classes_indisponiveis"):
+            indisp_fmt = ", ".join(f"{c} ({m})"
+                                   for c, m in sorted(resultado["classes_indisponiveis"].items()))
+            print(f"⚠️  Classe existe no NeoPZ mas não está disponível aqui: {indisp_fmt}")
+            print("   O código não vai compilar sem esse header — a compilação foi pulada,")
+            print("   não é alucinação do modelo (ver _classes_indisponiveis)")
+        if resultado.get("fontes_nao_api"):
+            nomes = ", ".join(Path(f).name for f in resultado["fontes_nao_api"])
+            print(f"ℹ️  Fontes de teste/benchmark consultadas: {nomes}")
+            print(f"   ({'/'.join(_DIRS_NAO_API)} viram executável separado, não entram na libpz —")
+            print("    servem para entender a classe, não como exemplo canônico de uso)")
         if resultado["valido"] and resultado["compilacao"]["status"] == "ok":
             print("✅ Compilado: o g++ aceitou o código — classes, métodos e assinaturas existem de verdade")
             print("   (compilar NÃO verifica o resultado físico — confira se o material/formulação é o adequado ao problema)")

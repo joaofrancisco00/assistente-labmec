@@ -92,6 +92,26 @@ def _rodape(resultado: dict) -> str:
                  for c in resultado["classes_legado"]]
         linhas.append("⚠️ **API antiga usada**: " + ", ".join(dicas))
 
+    # A classe existe no NeoPZ, mas o header não está instalado nesta máquina —
+    # o código não compila aqui, e isso NÃO é alucinação do modelo. O selo acima
+    # já não diz "Compilado" nesse caso (a compilação é pulada), mas o usuário
+    # precisa saber por que o código não vai passar no compilador dele.
+    if resultado.get("classes_indisponiveis"):
+        linhas.append("⚠️ **Classe fora desta instalação do NeoPZ**: " + ", ".join(
+            f"{c} ({m})" for c, m in sorted(resultado["classes_indisponiveis"].items())
+        ) + " — a classe existe no NeoPZ, mas o header não está instalado aqui, "
+            "então este código não compila nesta máquina")
+
+    # Código de teste/benchmark não é exemplo de uso da biblioteca: compila,
+    # mas o CMake o transforma em executável separado, nunca na libpz. Ele só
+    # chega aqui quando a API real não tinha nada melhor a oferecer — dizer
+    # isso é mais honesto do que listá-lo no rodapé como fonte qualquer.
+    if resultado.get("fontes_nao_api"):
+        linhas.append("ℹ️ **Fontes de teste/benchmark**: " + ", ".join(
+            f"`{Path(f).name}`" for f in resultado["fontes_nao_api"]
+        ) + " — é código de teste do NeoPZ, não a biblioteca: serve para entender "
+            "a classe, não como exemplo canônico de uso")
+
     fontes = ", ".join(sorted(Path(f).name for f in resultado["fontes"]))
     linhas.append(f"📄 **Fontes** ({resultado['tentativas']} tentativa(s)): {fontes}")
 
