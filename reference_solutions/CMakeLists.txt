@@ -17,12 +17,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(NeoPZ REQUIRED)
 
-add_executable(poisson2d      task_03_poisson2d/poisson.cpp)
-add_executable(elasticidade2d task_04_elasticidade2d/elasticidade.cpp)
-add_executable(darcy_misto2d  task_05_darcy_misto/darcy_misto.cpp)
-add_executable(darcy_h1_2d    task_06_darcy_h1/darcy_h1.cpp)
+add_executable(poisson2d       task_03_poisson2d/poisson.cpp)
+add_executable(elasticidade2d  task_04_elasticidade2d/elasticidade.cpp)
+add_executable(darcy_misto2d   task_05_darcy_misto/darcy_misto.cpp)
+add_executable(darcy_h1_2d     task_06_darcy_h1/darcy_h1.cpp)
+add_executable(manual_geomesh  task_07_manual_geomesh/manual_geomesh.cpp)
 
-foreach(alvo poisson2d elasticidade2d darcy_misto2d darcy_h1_2d)
+foreach(alvo poisson2d elasticidade2d darcy_misto2d darcy_h1_2d manual_geomesh)
     target_link_libraries(${alvo} PRIVATE NeoPZ::pz)
     target_include_directories(${alvo} PRIVATE ${PZ_INCLUDE_DIRS})
 endforeach()
