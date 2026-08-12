@@ -1462,6 +1462,7 @@ def _corrigir_includes_automaticamente(
                  for forma_certa in sorted(set(faltando.values()))]
         if ultimo_include_idx >= 0:
             linhas = linhas[:ultimo_include_idx + 1] + novas + linhas[ultimo_include_idx + 1:]
+            correcoes += [f'{c}: + #include "{forma_certa}"' for c, forma_certa in faltando.items()]
         else:
             # Nenhum include na resposta: a inserção precisa cair DENTRO do
             # bloco ```cpp. Colocar no topo do texto punha o header na prosa,
@@ -1474,10 +1475,14 @@ def _corrigir_includes_automaticamente(
             abre_bloco = next((i for i, l in enumerate(linhas)
                                if re.match(r'\s*```(?:cpp|c\+\+|cxx|cc|c)?[ \t]*$', l,
                                            re.IGNORECASE)), None)
-            corte = abre_bloco + 1 if abre_bloco is not None else 0
-            linhas = linhas[:corte] + novas + linhas[corte:]
-
-        correcoes += [f'{c}: + #include "{forma_certa}"' for c, forma_certa in faltando.items()]
+            
+            if abre_bloco is not None:
+                corte = abre_bloco + 1
+                linhas = linhas[:corte] + novas + linhas[corte:]
+                correcoes += [f'{c}: + #include "{forma_certa}"' for c, forma_certa in faltando.items()]
+            # Se abre_bloco for None, não há bloco de código válido e nem #includes
+            # prévios. Provavelmente é uma resposta em prosa. Desistimos de injetar
+            # para não colocar os includes no topo do texto soltos.
 
     return "\n".join(linhas), correcoes
 

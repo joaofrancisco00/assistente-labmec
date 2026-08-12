@@ -22,3 +22,4 @@ reference_solutions/build/
 # Sistema / editor
 .DS_Store
 .vscode/
+.cache/
