@@ -34,7 +34,7 @@ OLLAMA_MODEL           = "qwen2.5-coder:7b"
 # prompt passa fácil de 4096 tokens, e parte das regras/do contexto recuperado
 # pode nem chegar ao modelo (o que explica em parte ele "ignorar" instruções
 # de correção). qwen2.5-coder suporta 32k; 16k dá folga sem estourar memória.
-NUM_CTX                = 16384
+NUM_CTX                = 8192
 
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 
@@ -100,7 +100,7 @@ EXAMPLE_POOL_MULT      = 6          # tamanho do pool buscado antes do boost por
 
 COL_HEADERS  = "neopz_headers"
 COL_EXAMPLES = "neopz_examples"
-COL_WIKI     = "neopz_wiki"        # documentação curada (wiki do professor)
+COL_WIKI     = "neopz_wiki"        # documentação curada
 
 K_WIKI       = 3                   # chunks da wiki a recuperar por consulta
 
