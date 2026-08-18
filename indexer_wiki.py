@@ -57,6 +57,14 @@ TIPO_MAP = {
 }
 
 
+def _prioridade(path: Path) -> str:
+    """Define a prioridade do documento para o RAG de código."""
+    if "flows" in path.parts:
+        return "alta"  # Receitas com código compilável = Ouro
+    if path.name == "catalogo-materiais-api-atual.md":
+        return "alta"  # Mapa de seleção de classes = Crítico
+    return "media"  # Conceitos teóricos e descrições = Apoio
+
 def _tipo(path: Path) -> str:
     partes = list(path.parts)
     if "wiki" in partes:
@@ -73,31 +81,38 @@ def _classes(texto: str) -> str:
 def _carregar_documentos() -> list:
     docs = []
 
-    if not WIKI_DIR.exists():
+    # ── Wiki: página inteira = um documento ──────────────────────────────────
+    if WIKI_DIR.exists():
+        wiki_files = [f for f in sorted(WIKI_DIR.rglob("*.md"))
+                      if ".obsidian" not in f.parts
+                      and "findings" not in f.parts
+                      and "sources" not in f.parts
+                      and f.name not in ["log.md", "index.md"]]
+        print(f"  Wiki: {len(wiki_files)} páginas focadas  →  {len(wiki_files)} documentos (1:1)")
+        for path in wiki_files:
+            try:
+                texto = path.read_text(encoding="utf-8", errors="replace").strip()
+            except Exception as e:
+                print(f"  ⚠️  {path.name}: {e}")
+                continue
+            if not texto:
+                continue
+            docs.append(Document(
+                page_content=texto,
+                metadata={
+                    "source":         str(path),
+                    "tipo":           _tipo(path),
+                    "titulo":         path.stem.replace("-", " ").replace("_", " "),
+                    "classes_usadas": _classes(texto),
+                }
+            ))
+    else:
         print(f"  ⚠️  Wiki não encontrada em {WIKI_DIR}")
-        return docs
 
-    wiki_files = [f for f in sorted(WIKI_DIR.rglob("*.md"))
-                  if ".obsidian" not in f.parts]
-    print(f"  Wiki: {len(wiki_files)} páginas → {len(wiki_files)} documentos (1:1)")
-
-    for path in wiki_files:
-        try:
-            texto = path.read_text(encoding="utf-8", errors="replace").strip()
-        except Exception as e:
-            print(f"  ⚠️  {path.name}: {e}")
-            continue
-        if not texto:
-            continue
-        docs.append(Document(
-            page_content=texto,
-            metadata={
-                "source":         str(path),
-                "tipo":           _tipo(path),
-                "titulo":         path.stem.replace("-", " ").replace("_", " "),
-                "classes_usadas": _classes(texto),
-            }
-        ))
+    # ── Deliverables (ignorados na Fase 1, exceto se adicionarmos exceções no futuro)
+    # Todos os relatórios pesados na raiz (ex: NEOPZ_TECHNICAL_ASSESSMENT.md)
+    # foram removidos do índice do RAG porque poluíam o pool com texto acadêmico.
+    print(f"  Deliverables raiz ignorados (apenas para leitura humana).")
 
     return docs
 

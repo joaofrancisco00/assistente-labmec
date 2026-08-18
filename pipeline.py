@@ -369,17 +369,22 @@ def _pergunta_e_explicativa(pergunta: str) -> bool:
 
 def _reservar_vagas_conceitos(docs: list, k: int, reservadas: int) -> list:
     """
-    Escolhe k documentos da wiki garantindo que pelo menos `reservadas` NÃO
-    sejam receitas (tipo 'doc_fluxo') — ver K_WIKI_CONCEITOS para o caso real
-    que motivou isto. Os reservados vêm primeiro (o catálogo é um mapa de
-    seleção: serve melhor ANTES dos exemplos), o resto entra por relevância.
+    Ordena por prioridade (alta > media) e depois garante a reserva de vagas
+    para documentos que NÃO são receitas (doc_fluxo). Isso garante que o
+    catálogo de materiais (que tem prioridade alta, mas não é receita) não seja
+    engolido por 3 receitas de prioridade alta.
     """
+    alta = [d for d in docs if d.metadata.get("prioridade") == "alta"]
+    media = [d for d in docs if d.metadata.get("prioridade") != "alta"]
+    docs_priorizados = alta + media
+
     if reservadas <= 0:
-        return docs[:k]
-    nao_receitas = [d for d in docs if d.metadata.get("tipo") != "doc_fluxo"]
+        return docs_priorizados[:k]
+
+    nao_receitas = [d for d in docs_priorizados if d.metadata.get("tipo") != "doc_fluxo"]
     escolhidos = nao_receitas[:reservadas]
     vistos = {d.page_content for d in escolhidos}
-    for doc in docs:
+    for doc in docs_priorizados:
         if len(escolhidos) >= k:
             break
         if doc.page_content not in vistos:
@@ -457,10 +462,8 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
             # Pergunta explicativa: receitas fora do contexto (ver
             # _pergunta_e_explicativa) — conceitos/código da wiki continuam
             w_pool = [d for d in w_pool if d.metadata.get("tipo") != "doc_fluxo"]
-        w_docs = _reservar_vagas_conceitos(
-            _boost_por_classe(w_pool, classes_citadas, "classes_usadas"),
-            K_WIKI, K_WIKI_CONCEITOS,
-        )
+        w_boosted = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")
+        w_docs = _reservar_vagas_conceitos(w_boosted, K_WIKI, K_WIKI_CONCEITOS)
 
     all_docs = h_docs + e_docs + w_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}
