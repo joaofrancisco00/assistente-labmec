@@ -23,3 +23,5 @@ reference_solutions/build/
 .DS_Store
 .vscode/
 .cache/
+
+teste_prosa.py

@@ -1,18 +1,24 @@
 """
-indexer_wiki.py  (v2 — página inteira por documento)
+indexer_wiki.py  (v3 — banco podado, só documentos úteis para gerar código)
 
 Indexa a wiki de análise do NeoPZ no banco ChromaDB, coleção 'neopz_wiki'.
 
 Estratégia:
-  • Wiki (pages/):     1 arquivo .md = 1 documento. Sem chunking.
-                       As páginas são pequenas (50-150 linhas) e já estão
-                       organizadas por classe/conceito — cortar quebraria
-                       a coerência e poderia separar assinaturas de métodos
-                       do contexto explicativo.
-  • Deliverables (ai-analysis/*.md):
-                       Arquivos maiores divididos apenas no heading '## ',
-                       mantendo cada seção intacta. Se o arquivo for pequeno
-                       (<8 000 chars) entra como um único documento.
+  • Wiki (wiki/):    1 arquivo .md = 1 documento. Sem chunking.
+                     As páginas são pequenas (50-150 linhas) e já estão
+                     organizadas por classe/conceito — cortar quebraria
+                     a coerência e poderia separar assinaturas de métodos
+                     do contexto explicativo.
+
+  • Subpastas indexadas:
+      flows/     → receitas completas com código compilável (prioridade máxima)
+      concepts/  → conceitos teóricos (hybridization, Piola, catálogo de materiais)
+      code/      → descrições de classes/módulos do NeoPZ
+
+  • Subpastas/arquivos REMOVIDOS do repositório (não ajudam o RAG de código):
+      findings/  → anotações de bugs/revisão de código
+      sources/   → resumos de artigos acadêmicos
+      *.md raiz  → relatórios de auditoria técnica (9-19 KB cada)
 
 Execute UMA VEZ (ou sempre que a wiki for atualizada):
 
@@ -38,22 +44,16 @@ from langchain_core.documents import Document
 # A wiki vive DENTRO do projeto (wiki_neopz/) — versionada no git e portável
 # para outras máquinas. Antes ficava em ~/Downloads/ai-analysis, que quebrava
 # silenciosamente em qualquer computador que não fosse o original.
-ANALISE_DIR = Path("./wiki_neopz")
-WIKI_DIR    = ANALISE_DIR / "wiki"
+WIKI_DIR    = Path("./wiki_neopz/wiki")
 INDEX_DIR   = Path("./banco_chroma_develop")  # ver nota em pipeline.py
 EMBED_MODEL = "BAAI/bge-base-en-v1.5"
 COL_WIKI    = "neopz_wiki"
-
-# Deliverables maiores que este limite são divididos por seção (## heading)
-MAX_PAGE_CHARS = 8_000
 # ──────────────────────────────────────────────────────────────────────────────
 
 TIPO_MAP = {
     "code":     "doc_codigo",
     "concepts": "doc_conceito",
-    "findings": "doc_finding",
     "flows":    "doc_fluxo",
-    "sources":  "doc_referencia",
 }
 
 
@@ -63,13 +63,7 @@ def _tipo(path: Path) -> str:
         idx = partes.index("wiki")
         subdir = partes[idx + 1] if idx + 1 < len(partes) else ""
         return TIPO_MAP.get(subdir, "doc_wiki_meta")
-    return "doc_analise"
-
-
-def _split_por_secao(texto: str) -> list:
-    """Divide texto apenas nos headings ## (seção de nível 1)."""
-    partes = re.split(r'(?m)^(?=## )', texto)
-    return [p.strip() for p in partes if p.strip()]
+    return "doc_wiki_meta"
 
 
 def _classes(texto: str) -> str:
@@ -79,68 +73,38 @@ def _classes(texto: str) -> str:
 def _carregar_documentos() -> list:
     docs = []
 
-    # ── Wiki: página inteira = um documento ──────────────────────────────────
-    if WIKI_DIR.exists():
-        wiki_files = [f for f in sorted(WIKI_DIR.rglob("*.md"))
-                      if ".obsidian" not in f.parts]
-        print(f"  Wiki: {len(wiki_files)} páginas  →  {len(wiki_files)} documentos (1:1)")
-        for path in wiki_files:
-            try:
-                texto = path.read_text(encoding="utf-8", errors="replace").strip()
-            except Exception as e:
-                print(f"  ⚠️  {path.name}: {e}")
-                continue
-            if not texto:
-                continue
-            docs.append(Document(
-                page_content=texto,
-                metadata={
-                    "source":         str(path),
-                    "tipo":           _tipo(path),
-                    "titulo":         path.stem.replace("-", " ").replace("_", " "),
-                    "classes_usadas": _classes(texto),
-                }
-            ))
-    else:
+    if not WIKI_DIR.exists():
         print(f"  ⚠️  Wiki não encontrada em {WIKI_DIR}")
+        return docs
 
-    # ── Deliverables: dividir por seção ## se arquivo grande ─────────────────
-    if ANALISE_DIR.exists():
-        deliverables = sorted(ANALISE_DIR.glob("*.md"))
-        n_secoes = 0
-        for path in deliverables:
-            try:
-                texto = path.read_text(encoding="utf-8", errors="replace").strip()
-            except Exception as e:
-                print(f"  ⚠️  {path.name}: {e}")
-                continue
-            if not texto:
-                continue
+    wiki_files = [f for f in sorted(WIKI_DIR.rglob("*.md"))
+                  if ".obsidian" not in f.parts]
+    print(f"  Wiki: {len(wiki_files)} páginas → {len(wiki_files)} documentos (1:1)")
 
-            secoes = _split_por_secao(texto) if len(texto) > MAX_PAGE_CHARS else [texto]
-            titulo_base = path.stem.replace("-", " ").replace("_", " ")
-            for sec in secoes:
-                docs.append(Document(
-                    page_content=sec,
-                    metadata={
-                        "source":         str(path),
-                        "tipo":           "doc_analise",
-                        "titulo":         titulo_base,
-                        "classes_usadas": _classes(sec),
-                    }
-                ))
-            n_secoes += len(secoes)
-
-        print(f"  Deliverables: {len(deliverables)} arquivos  →  {n_secoes} seções")
-    else:
-        print(f"  ⚠️  ai-analysis não encontrada em {ANALISE_DIR}")
+    for path in wiki_files:
+        try:
+            texto = path.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception as e:
+            print(f"  ⚠️  {path.name}: {e}")
+            continue
+        if not texto:
+            continue
+        docs.append(Document(
+            page_content=texto,
+            metadata={
+                "source":         str(path),
+                "tipo":           _tipo(path),
+                "titulo":         path.stem.replace("-", " ").replace("_", " "),
+                "classes_usadas": _classes(texto),
+            }
+        ))
 
     return docs
 
 
 def main():
     print("=" * 58)
-    print("  INDEXADOR WIKI NEOPZ  (v2 — página inteira por doc)")
+    print("  INDEXADOR WIKI NEOPZ  (v3 — banco podado)")
     print("=" * 58)
     print()
 
