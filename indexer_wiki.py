@@ -57,6 +57,14 @@ TIPO_MAP = {
 }
 
 
+def _prioridade(path: Path) -> str:
+    """Define a prioridade do documento para o RAG de código."""
+    if "flows" in path.parts:
+        return "alta"  # Receitas com código compilável = Ouro
+    if path.name == "catalogo-materiais-api-atual.md":
+        return "alta"  # Mapa de seleção de classes = Crítico
+    return "media"  # Conceitos teóricos e descrições = Apoio
+
 def _tipo(path: Path) -> str:
     partes = list(path.parts)
     if "wiki" in partes:
@@ -82,8 +90,11 @@ def _carregar_documentos() -> list:
     # ── Wiki: página inteira = um documento ──────────────────────────────────
     if WIKI_DIR.exists():
         wiki_files = [f for f in sorted(WIKI_DIR.rglob("*.md"))
-                      if ".obsidian" not in f.parts]
-        print(f"  Wiki: {len(wiki_files)} páginas  →  {len(wiki_files)} documentos (1:1)")
+                      if ".obsidian" not in f.parts
+                      and "findings" not in f.parts
+                      and "sources" not in f.parts
+                      and f.name not in ["log.md", "index.md"]]
+        print(f"  Wiki: {len(wiki_files)} páginas focadas  →  {len(wiki_files)} documentos (1:1)")
         for path in wiki_files:
             try:
                 texto = path.read_text(encoding="utf-8", errors="replace").strip()
@@ -104,36 +115,10 @@ def _carregar_documentos() -> list:
     else:
         print(f"  ⚠️  Wiki não encontrada em {WIKI_DIR}")
 
-    # ── Deliverables: dividir por seção ## se arquivo grande ─────────────────
-    if ANALISE_DIR.exists():
-        deliverables = sorted(ANALISE_DIR.glob("*.md"))
-        n_secoes = 0
-        for path in deliverables:
-            try:
-                texto = path.read_text(encoding="utf-8", errors="replace").strip()
-            except Exception as e:
-                print(f"  ⚠️  {path.name}: {e}")
-                continue
-            if not texto:
-                continue
-
-            secoes = _split_por_secao(texto) if len(texto) > MAX_PAGE_CHARS else [texto]
-            titulo_base = path.stem.replace("-", " ").replace("_", " ")
-            for sec in secoes:
-                docs.append(Document(
-                    page_content=sec,
-                    metadata={
-                        "source":         str(path),
-                        "tipo":           "doc_analise",
-                        "titulo":         titulo_base,
-                        "classes_usadas": _classes(sec),
-                    }
-                ))
-            n_secoes += len(secoes)
-
-        print(f"  Deliverables: {len(deliverables)} arquivos  →  {n_secoes} seções")
-    else:
-        print(f"  ⚠️  ai-analysis não encontrada em {ANALISE_DIR}")
+    # ── Deliverables (ignorados na Fase 1, exceto se adicionarmos exceções no futuro)
+    # Todos os relatórios pesados na raiz (ex: NEOPZ_TECHNICAL_ASSESSMENT.md)
+    # foram removidos do índice do RAG porque poluíam o pool com texto acadêmico.
+    print(f"  Deliverables raiz ignorados (apenas para leitura humana).")
 
     return docs
 
