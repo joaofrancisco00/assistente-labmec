@@ -97,6 +97,7 @@ Toda resposta vem com um selo no rodapé:
 | `renames.json` | Mapa curado classe antiga → atual (editável à mão) |
 | `wiki_neopz/` | Wiki curada (receitas, catálogo de materiais, conceitos) |
 | `reference_solutions/` | Receitas canônicas + `CMakeLists.txt` de verificação |
+| `header_index/` | Tabela determinística para o corretor automático de `#include` |
 | `banco_chroma_develop/` | Índice vetorial + whitelists (gerado; fora do git) |
 | `base_de_dados/neopz/` | Código do NeoPZ (submodule pinado em `852a5116c`) |
 | `eval_benchmark.py` | Benchmark automático de qualidade (6 perguntas, 35 checks) |

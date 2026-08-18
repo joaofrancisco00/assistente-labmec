@@ -294,9 +294,6 @@ def main():
             report_lines.append(f"  - {relpath}: {err}")
 
     report = "\n".join(report_lines)
-    with open(os.path.join(args.out, "report.txt"), "w", encoding="utf-8") as f:
-        f.write(report + "\n")
-
     print(report)
     print(f"\nArquivos gerados em: {os.path.abspath(args.out)}")
 
