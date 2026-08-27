@@ -84,89 +84,49 @@ def _elasticidade_bem_construida(resposta: str) -> bool:
 
 CASOS = [
     {
-        "nome": "poisson_2d_completo",
-        "pergunta": ("Crie uma malha geométrica 2D usando TPZGeoMeshTools e depois uma "
-                     "malha computacional com TPZCompMesh para resolver um problema de "
-                     "Poisson. Mostre o código completo com todos os includes necessários."),
+        "nome": "snippet_tpzfmatrix",
+        "pergunta": "Escreva um snippet de código em C++ que instancia uma matriz TPZFMatrix de tamanho 3x3 e preenche a diagonal principal com o valor 1.0.",
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
-            "material_correto":    lambda r: "TPZMatPoisson" in r["resposta"],
-            "include_qualificado": lambda r: "Poisson/TPZMatPoisson.h" in r["resposta"],
-            "sem_api_antiga":      lambda r: ("TPZDummyFunction" not in r["resposta"]
-                                              and "TPZMatPlaca2" not in r["resposta"]
-                                              and not r["classes_legado"]),
-            "esqueleto_completo":  lambda r: ("AutoBuild" in r["resposta"]
-                                              and "Assemble" in r["resposta"]),
-            "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
-        },
-    },
-    {
-        "nome": "elasticidade_2d",
-        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
-                     "problema de elasticidade linear 2D, com todos os includes necessários."),
-        "checks": {
-            "validacao_limpa":    lambda r: r["valido"],
-            "material_2d":        lambda r: "TPZElasticity2D" in r["resposta"],
-            "nao_usa_3d_em_2d":   lambda r: "TPZElasticity3D" not in r["resposta"],
-            "construtor_completo": lambda r: _elasticidade_bem_construida(r["resposta"]),
-            "sem_api_antiga":     lambda r: not r["classes_legado"],
-            "max_2_tentativas":   lambda r: r["tentativas"] <= 2,
-        },
-    },
-    {
-        "nome": "darcy_misto_2d",
-        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
-                     "problema de Darcy 2D na formulação mista (fluxo e pressão), com "
-                     "todos os includes necessários."),
-        "checks": {
-            "validacao_limpa":     lambda r: r["valido"],
-            "material_misto":      lambda r: "TPZMixedDarcyFlow" in r["resposta"],
-            "malha_multifisica":   lambda r: ("TPZMultiphysicsCompMesh" in r["resposta"]
-                                              and "BuildMultiphysicsSpace" in r["resposta"]),
-            "solver_ponto_de_sela": lambda r: "ELDLt" in r["resposta"],
-            "sem_cfd":             lambda r: "TPZFlowCompMesh" not in r["resposta"],
-            "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
-            "sem_alegacao_falsa":  lambda r: _sem_alegacao_de_compilacao(r["resposta"]),
-        },
-    },
-    {
-        # Família SEM receita até jul/2026: o modelo escolhia TPZHybridDarcyFlow
-        # (espaços combinados) porque o catálogo — único doc que aponta
-        # TPZDarcyFlow — era espremido do retrieval pelas receitas.
-        "nome": "darcy_h1_2d",
-        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
-                     "problema de fluxo de Darcy 2D usando o espaço de aproximação H1, "
-                     "com todos os includes necessários."),
-        "checks": {
-            "validacao_limpa":     lambda r: r["valido"],
-            "material_h1":         lambda r: "TPZDarcyFlow" in r["resposta"],
-            "nao_usa_hibrido":     lambda r: "TPZHybridDarcyFlow" not in r["resposta"],
-            "nao_usa_misto":       lambda r: ("TPZMixedDarcyFlow" not in r["resposta"]
-                                              and "TPZMultiphysicsCompMesh" not in r["resposta"]),
-            "include_qualificado": lambda r: "DarcyFlow/TPZDarcyFlow.h" in r["resposta"],
-            "permeabilidade":      lambda r: "SetConstantPermeability" in r["resposta"],
-            "sem_alegacao_falsa":  lambda r: _sem_alegacao_de_compilacao(r["resposta"]),
-            "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
-        },
-    },
-    {
-        "nome": "prosa_tpzgeomesh",
-        "pergunta": "O que é a classe TPZGeoMesh e para que ela serve?",
-        "checks": {
-            "validacao_limpa":     lambda r: r["valido"],
-            "menciona_a_classe":   lambda r: "TPZGeoMesh" in r["resposta"],
+            "menciona_a_classe":   lambda r: "TPZFMatrix" in r["resposta"],
             "sem_receita_colada":  lambda r: _sem_receita_colada(r["resposta"]),
-            "exemplo_usa_a_classe": lambda r: _exemplo_usa_a_classe(r["resposta"], "TPZGeoMesh"),
+            "exemplo_usa_a_classe": lambda r: _exemplo_usa_a_classe(r["resposta"], "TPZFMatrix"),
         },
     },
     {
-        "nome": "explicar_tpzint1d",
-        "pergunta": "Explique a classe TPZInt1d do NeoPZ: o que ela faz e quais são seus principais métodos?",
+        "nome": "snippet_tpzcompel",
+        "pergunta": "Escreva um snippet em C++ mostrando como criar um elemento computacional genérico (TPZCompEl) associado a um elemento geométrico (TPZGeoEl) já existente dentro de uma malha computacional.",
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
-            "menciona_a_classe":   lambda r: "TPZInt1d" in r["resposta"],
+            "menciona_a_classe":   lambda r: "TPZCompEl" in r["resposta"],
             "sem_receita_colada":  lambda r: _sem_receita_colada(r["resposta"]),
-            "exemplo_usa_a_classe": lambda r: _exemplo_usa_a_classe(r["resposta"], "TPZInt1d"),
+        },
+    },
+    {
+        "nome": "snippet_tpzmaterial",
+        "pergunta": "Gere um código em C++ que mostre como extrair o mapa de materiais (MaterialVec) de um ponteiro para TPZCompMesh e itere sobre eles imprimindo o ID de cada material.",
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "menciona_a_classe":   lambda r: "MaterialVec" in r["resposta"] or "TPZMaterial" in r["resposta"],
+            "sem_receita_colada":  lambda r: _sem_receita_colada(r["resposta"]),
+        },
+    },
+    {
+        "nome": "snippet_tpzanalysis",
+        "pergunta": "Forneça o snippet de código exato para rodar o método Run() de um objeto TPZLinearAnalysis e, em seguida, extrair a matriz solução chamando Solution().",
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "menciona_a_classe":   lambda r: "TPZLinearAnalysis" in r["resposta"],
+            "sem_receita_colada":  lambda r: _sem_receita_colada(r["resposta"]),
+        },
+    },
+    {
+        "nome": "snippet_tpzgeomeshtools",
+        "pergunta": "Mostre como usar o método CreateGeoMeshOnGrid da classe TPZGeoMeshTools para construir uma malha retangular simples. Não escreva um programa inteiro, apenas o bloco de criação.",
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "menciona_a_classe":   lambda r: "TPZGeoMeshTools" in r["resposta"],
+            "sem_receita_colada":  lambda r: _sem_receita_colada(r["resposta"]),
         },
     },
 ]

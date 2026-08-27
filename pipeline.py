@@ -9,9 +9,17 @@ import subprocess
 import tempfile
 
 try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except ImportError:
+    ChatGoogleGenerativeAI = None
+
+try:
     from langchain_ollama import OllamaLLM
 except ImportError:
-    from langchain_community.llms import Ollama as OllamaLLM
+    try:
+        from langchain_community.llms import Ollama as OllamaLLM
+    except ImportError:
+        OllamaLLM = None
 
 try:
     from langchain_huggingface import HuggingFaceEmbeddings
@@ -26,6 +34,7 @@ except ImportError:
 from cpp_parser import DIRS_LEGADO, find_tpz_classes_in_code, find_suspicious_method_calls
 
 # ── Configurações ──────────────────────────────────────────────────────────────
+GEMINI_MODEL           = "gemini-3.6-flash"
 OLLAMA_MODEL           = "qwen2.5-coder:7b"
 
 # Janela de contexto pedida ao Ollama. SEM isso, o servidor usa o default dele
@@ -1665,7 +1674,7 @@ def gerar_codigo(
         )
 
         tokens_estimados = len(prompt) // 4  # ~4 chars/token p/ código + PT misto
-        if tokens_estimados > int(NUM_CTX * 0.9):
+        if type(llm).__name__ == "OllamaLLM" and tokens_estimados > int(NUM_CTX * 0.9):
             print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
         # 4. Chama o modelo — em streaming quando possível, para a interface
@@ -1674,11 +1683,20 @@ def gerar_codigo(
         try:
             pedacos = []
             for pedaco in llm.stream(prompt):
-                pedacos.append(pedaco)
-                _emitir(on_evento, "token", pedaco)
+                texto = pedaco.content if hasattr(pedaco, "content") else pedaco
+                if isinstance(texto, list):
+                    texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
+                texto = str(texto)
+                
+                pedacos.append(texto)
+                _emitir(on_evento, "token", texto)
             resposta = "".join(pedacos)
         except (AttributeError, NotImplementedError):
-            resposta = llm.invoke(prompt)
+            ret = llm.invoke(prompt)
+            texto = ret.content if hasattr(ret, "content") else ret
+            if isinstance(texto, list):
+                texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
+            resposta = str(texto)
 
         # 4.5 Correção determinística pós-geração — não depende do LLM obedecer
         #     a instrução de correção no prompt (na prática ele não obedece de
@@ -1873,6 +1891,17 @@ def gerar_codigo(
 
 # ── Loop de conversa ───────────────────────────────────────────────────────────
 
+def obter_llm():
+    if "GOOGLE_API_KEY" in os.environ and ChatGoogleGenerativeAI is not None:
+        print(f"  ☁️  Usando Gemini ({GEMINI_MODEL}) via API...")
+        return ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=TEMPERATURE)
+    else:
+        if OllamaLLM is None:
+            print("Erro: Nem o pacote do Gemini nem o do Ollama foram encontrados.")
+            exit(1)
+        print(f"  💻 Usando modelo local ({OLLAMA_MODEL}) via Ollama...")
+        return OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+
 def main():
     print("Carregando modelos e banco de dados...")
 
@@ -1891,7 +1920,7 @@ def main():
     renames            = _carregar_renames()
     legacy_classes     = _carregar_legacy_classes()
     system_base        = _carregar_system_prompt()
-    llm                = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+    llm                = obter_llm()
 
     print("\n" + "=" * 50)
     print("  🤖 Assistente LabMeC Pronto!")
