@@ -7,6 +7,7 @@ import difflib
 import shutil
 import subprocess
 import tempfile
+import time
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -1680,23 +1681,35 @@ def gerar_codigo(
         # 4. Chama o modelo — em streaming quando possível, para a interface
         #    mostrar os tokens saindo (num 7b local a resposta leva dezenas de
         #    segundos; sem feedback o usuário acha que travou)
-        try:
-            pedacos = []
-            for pedaco in llm.stream(prompt):
-                texto = pedaco.content if hasattr(pedaco, "content") else pedaco
+        #    Retry com backoff para erros 503 (alta demanda) da API do Gemini.
+        _MAX_RETRIES_API = 2
+        for _api_try in range(1, _MAX_RETRIES_API + 1):
+            try:
+                pedacos = []
+                for pedaco in llm.stream(prompt):
+                    texto = pedaco.content if hasattr(pedaco, "content") else pedaco
+                    if isinstance(texto, list):
+                        texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
+                    texto = str(texto)
+                    pedacos.append(texto)
+                    _emitir(on_evento, "token", texto)
+                resposta = "".join(pedacos)
+                break  # sucesso, sai do loop de retry
+            except (AttributeError, NotImplementedError):
+                ret = llm.invoke(prompt)
+                texto = ret.content if hasattr(ret, "content") else ret
                 if isinstance(texto, list):
                     texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
-                texto = str(texto)
-                
-                pedacos.append(texto)
-                _emitir(on_evento, "token", texto)
-            resposta = "".join(pedacos)
-        except (AttributeError, NotImplementedError):
-            ret = llm.invoke(prompt)
-            texto = ret.content if hasattr(ret, "content") else ret
-            if isinstance(texto, list):
-                texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
-            resposta = str(texto)
+                resposta = str(texto)
+                break  # sucesso via invoke, sai do loop
+            except Exception as e:
+                erro_str = str(e)
+                if ("503" in erro_str or "429" in erro_str) and _api_try < _MAX_RETRIES_API:
+                    print(f"  ⚠️  API do Google indisponível ou limite atingido. Acionando o Ollama local ({OLLAMA_MODEL}) imediatamente...")
+                    if OllamaLLM is not None:
+                        llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+                    continue
+                raise  # erro não tratável ou Ollama não disponível
 
         # 4.5 Correção determinística pós-geração — não depende do LLM obedecer
         #     a instrução de correção no prompt (na prática ele não obedece de
@@ -1894,7 +1907,7 @@ def gerar_codigo(
 def obter_llm():
     if "GOOGLE_API_KEY" in os.environ and ChatGoogleGenerativeAI is not None:
         print(f"  ☁️  Usando Gemini ({GEMINI_MODEL}) via API...")
-        return ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=TEMPERATURE)
+        return ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=TEMPERATURE, max_retries=0)
     else:
         if OllamaLLM is None:
             print("Erro: Nem o pacote do Gemini nem o do Ollama foram encontrados.")
