@@ -14,7 +14,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 
 try:
     from langchain_huggingface import HuggingFaceEmbeddings
@@ -127,6 +127,15 @@ def _indexar_headers(embeddings, chunks_por_arquivo: dict):
             try:
                 raw = h_file.read_text(encoding='utf-8', errors='replace')
                 if raw.strip():
+                    # Ignorar arquivos dominados por boilerplate de licença
+                    if "This file is part of the PZ environment" in raw or "Universidade Estadual de Campinas" in raw:
+                        if len(raw.strip()) < 1000:
+                            continue
+                    # Ignorar se o header for apenas includes e pragmas
+                    linhas_uteis = [l for l in raw.splitlines() if l.strip() and not l.strip().startswith('#include') and not l.strip().startswith('#pragma')]
+                    if len('\n'.join(linhas_uteis).strip()) < 50:
+                        continue
+                        
                     documents.append(Document(
                         page_content=raw[:2000],
                         metadata={"source": str(h_file), "tipo": "header", "classe": ""}
@@ -181,10 +190,10 @@ def _indexar_exemplos(embeddings):
           f" ({len(todos_cpp) - len(cpp_files)} do legado excluídos)")
 
     # Separadores que fazem sentido em C++ (evita cortar dentro de funções)
-    splitter = RecursiveCharacterTextSplitter(
+    splitter = RecursiveCharacterTextSplitter.from_language(
+        language=Language.CPP,
         chunk_size=EXAMPLE_CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\nint ", "\nvoid ", "\nbool ", "\nTPZ", "\n{", "\n}", "\n", " "],
     )
 
     documents = []
@@ -195,8 +204,20 @@ def _indexar_exemplos(embeddings):
             continue
 
         for chunk in splitter.split_text(content):
+            # Filtro 1: Licenças puras ou boilerplate longo
+            if "This file is part of the PZ environment" in chunk or "Universidade Estadual de Campinas" in chunk:
+                if len(chunk.strip()) < 1000:
+                    continue
+
             # Registra quais classes TPZ aparecem nesse trecho (ajuda no retrieval)
             tpz_classes = ", ".join(set(re.findall(r'\bTPZ[A-Z]\w+', chunk)))
+            
+            # Filtro 2: Trechos vazios de lógica (só chaves, includes) e sem menção à biblioteca
+            if not tpz_classes:
+                linhas_uteis = [l for l in chunk.splitlines() if l.strip() and not l.strip().startswith('#include')]
+                if len('\n'.join(linhas_uteis).strip()) < 150:
+                    continue
+
             documents.append(Document(
                 page_content=chunk,
                 metadata={

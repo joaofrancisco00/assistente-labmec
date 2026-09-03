@@ -376,6 +376,10 @@ def _pergunta_e_explicativa(pergunta: str) -> bool:
     return (bool(_PERGUNTA_EXPLICATIVA_RE.search(pergunta))
             and not _PEDIDO_DE_CODIGO_RE.search(pergunta))
 
+def _pede_snippet_curto(pergunta: str) -> bool:
+    """Se a pergunta pede explicitamente um 'snippet', não queremos receitas completas."""
+    return bool(re.search(r'\bsnippet\b', pergunta, re.IGNORECASE))
+
 
 def _reservar_vagas_conceitos(docs: list, k: int, reservadas: int) -> list:
     """
@@ -468,8 +472,8 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
         w_pool = wiki_db.max_marginal_relevance_search(
             pergunta, k=K_WIKI * EXAMPLE_POOL_MULT, fetch_k=K_WIKI * EXAMPLE_POOL_MULT * 2
         )
-        if explicativa:
-            # Pergunta explicativa: receitas fora do contexto (ver
+        if explicativa or _pede_snippet_curto(pergunta):
+            # Pergunta explicativa ou snippet: receitas fora do contexto (ver
             # _pergunta_e_explicativa) — conceitos/código da wiki continuam
             w_pool = [d for d in w_pool if d.metadata.get("tipo") != "doc_fluxo"]
         w_boosted = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")
@@ -1328,41 +1332,38 @@ def _corrigir_metodos_automaticamente(codigo: str, metodos_suspeitos: list, clas
     """
     Mesmo princípio de _corrigir_classes_automaticamente, mas para chamadas
     de método.
-
-    IMPORTANTE — diferente da correção de classe: aqui a busca de
-    correspondência é restrita aos métodos da PRÓPRIA classe
-    (class_methods_index), não à whitelist global de métodos.
-    A whitelist global tem ~3900 nomes curtos e genéricos (Create*, Get*,
-    Set*...) repetidos de forma parecida em dezenas de classes — usá-la aqui
-    já causou uma correção automática ERRADA de verdade: 'CreateRectMesh'
-    (inventado) virou 'CreateMesh' (método de OUTRA classe, por coincidência
-    de string) em vez do método real 'CreateGeoMeshOnGrid'. Restringir à
-    própria classe evita essa contaminação cruzada — se a classe não estiver
-    no índice ou não houver candidato bom o bastante ali, a chamada
-    simplesmente NÃO é reescrita (fica marcada como suspeita mesmo, para
-    revisão/instrução no prompt), o que é o comportamento seguro.
-
-    Só troca o texto da CHAMADA em si (`->metodo(`, `.metodo(`,
-    `Classe::metodo(`), preservando o prefixo (`->`/`.`/`::`).
-
-    Retorna (codigo_corrigido, lista_de_correcoes_aplicadas).
     """
     if not class_methods_index or not metodos_suspeitos:
         return codigo, []
+
+    # Alias curados determinísticos antes do difflib
+    method_aliases = {
+        "GetId": "Id",
+        "GetID": "Id",
+        "NumID": "Id",
+        "GetMatId": "Id",
+        "GetIndex": "Index",
+    }
 
     correcoes = []
     for classe, errado in metodos_suspeitos:
         candidatos_da_classe = class_methods_index.get(classe)
         if not candidatos_da_classe:
             continue  # classe fora do índice (ou sem métodos capturados) — não arrisca
-        candidatos = difflib.get_close_matches(errado, candidatos_da_classe, n=1, cutoff=CUTOFF_METODO_AUTOMATICO)
-        if not candidatos:
-            continue
-        certo = candidatos[0]
-        padrao = re.compile(r'(->|\.|::)\s*' + re.escape(errado) + r'\s*\(')
-        codigo, n = padrao.subn(r'\1' + certo + '(', codigo)
-        if n:
-            correcoes.append(f"{classe}::{errado} → {classe}::{certo}")
+            
+        certo = None
+        if errado in method_aliases and method_aliases[errado] in candidatos_da_classe:
+            certo = method_aliases[errado]
+        else:
+            candidatos = difflib.get_close_matches(errado, candidatos_da_classe, n=1, cutoff=CUTOFF_METODO_AUTOMATICO)
+            if candidatos:
+                certo = candidatos[0]
+
+        if certo:
+            padrao = re.compile(r'(->|\.|::)\s*' + re.escape(errado) + r'\s*\(')
+            codigo, n = padrao.subn(r'\1' + certo + '(', codigo)
+            if n:
+                correcoes.append(f"{classe}::{errado} → {classe}::{certo}")
     return codigo, correcoes
 
 
