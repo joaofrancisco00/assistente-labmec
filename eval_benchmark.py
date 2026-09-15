@@ -195,6 +195,8 @@ def main():
 
     for caso in CASOS:
         print(f"\n{'=' * 60}\n▶ {caso['nome']}\n{'=' * 60}")
+        import time
+        start_time = time.time()
         resultado = gerar_codigo(
             caso["pergunta"], llm, headers_db, examples_db,
             whitelist, headers_whitelist, system_base,
@@ -202,6 +204,9 @@ def main():
             methods_whitelist, class_methods_index,
             renames, legacy_classes,
         )
+        elapsed = time.time() - start_time
+        print(f"⏱️ Tempo da resposta: {elapsed:.2f}s")
+        resultado["tempo_s"] = elapsed
         checks_caso = {}
         for nome_check, fn in caso["checks"].items():
             try:
