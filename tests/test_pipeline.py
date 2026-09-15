@@ -109,7 +109,7 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         self.assertEqual(pipeline._include_para_header("Mesh/pzgmesh.h"), "pzgmesh.h")
 
     def test_injecao_usa_forma_compilavel(self):
-        codigo = 'int main() { TPZMatPoisson<STATE> *m = new TPZMatPoisson<STATE>(1, 2); }\n'
+        codigo = '```cpp\nint main() { TPZMatPoisson<STATE> *m = new TPZMatPoisson<STATE>(1, 2); }\n```\n'
         corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
             codigo,
             {"TPZMatPoisson": "Material/Poisson/TPZMatPoisson.h"},
@@ -159,7 +159,7 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         # Regressão real (capturada pelo eval): ao explicar TPZInt1d o modelo
         # escrevia #include "pzint1d.h" — header inexistente, imitando a
         # convenção pzgmesh.h/pzquad.h. O certo é pzquad.h.
-        codigo = '#include "pzint1d.h"\n\nTPZInt1d regra(2, 0);\n'
+        codigo = '```cpp\n#include "pzint1d.h"\n\nTPZInt1d regra(2, 0);\n```\n'
         corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
             codigo,
             {"TPZInt1d": "Integral/pzquad.h"},
@@ -541,7 +541,8 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
     CODIGO = "int main() { TPZBurger *m = new TPZBurger(1, 2); }\n"
 
     def setUp(self):
-        pipeline._INDISPONIVEL_CACHE.clear()
+        pipeline.validation._INDISPONIVEL_CACHE.clear()
+        self.maxDiff = None
 
     tearDown = setUp
 
@@ -549,7 +550,7 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
         # needrefactor/ não é citado em nenhum CMakeLists do NeoPZ (develop e
         # 2022): é fato da revisão, não da máquina — vale mesmo sem NeoPZ
         # instalado, que é o Caminho A do README
-        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+        with patch.object(pipeline.validation, "_neopz_prefix", return_value=None):
             self.assertEqual(pipeline._motivo_indisponivel(self.BURGER["TPZBurger"]),
                              "não faz parte do build do NeoPZ")
             self.assertIsNone(pipeline._motivo_indisponivel("Mesh/pzgmesh.h"))
@@ -563,16 +564,16 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             inc = Path(tmp) / "include" / "Material"
             (inc / "Plasticity").mkdir(parents=True)
-            with patch.object(pipeline, "_neopz_prefix", return_value=Path(tmp)), \
-                 patch.object(pipeline, "_include_flags", return_value=[f"-I{inc}"]):
+            with patch.object(pipeline.validation, "_neopz_prefix", return_value=Path(tmp)), \
+                 patch.object(pipeline.validation, "_include_flags", return_value=[f"-I{inc}"]):
                 self.assertEqual(pipeline._motivo_indisponivel(caminho),
                                  "não está nesta instalação do NeoPZ")
-                pipeline._INDISPONIVEL_CACHE.clear()
+                pipeline.validation._INDISPONIVEL_CACHE.clear()
                 (inc / "Plasticity" / "TPZMatElastoPlastic.h").write_text("")
                 self.assertIsNone(pipeline._motivo_indisponivel(caminho))
 
     def test_include_impossivel_nao_e_injetado(self):
-        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+        with patch.object(pipeline.validation, "_neopz_prefix", return_value=None):
             corrigido, correcoes = pipeline._corrigir_includes_automaticamente(
                 self.CODIGO, self.BURGER, {}, {"pzburger.h"})
         self.assertNotIn("#include", corrigido)
@@ -580,7 +581,7 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
 
     def test_include_impossivel_nao_e_exigido(self):
         # Exigir dispararia retry a cada tentativa, sem nunca poder ser atendido
-        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+        with patch.object(pipeline.validation, "_neopz_prefix", return_value=None):
             self.assertEqual(
                 pipeline._validar_includes_por_classe(self.CODIGO, self.BURGER, {}), {})
 
@@ -591,7 +592,7 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
         # máquina nenhuma, com selo de "corrigido automaticamente" junto
         codigo = "int main() { TPZBurguer *m = nullptr; }"
         whitelist = {"TPZBurger", "TPZDarcyFlow"}
-        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+        with patch.object(pipeline.validation, "_neopz_prefix", return_value=None):
             destinos = pipeline._whitelist_utilizavel(whitelist, self.BURGER)
             _, correcoes = pipeline._corrigir_classes_automaticamente(
                 codigo, whitelist, {}, destinos=destinos)
@@ -602,14 +603,14 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
     def test_classe_fora_do_indice_continua_sendo_destino(self):
         # Não saber onde a classe mora não é motivo para descartá-la: sem
         # entrada no índice classe→header, ela segue disponível como destino
-        with patch.object(pipeline, "_neopz_prefix", return_value=None):
+        with patch.object(pipeline.validation, "_neopz_prefix", return_value=None):
             destinos = pipeline._whitelist_utilizavel({"TPZClasseNova"}, self.BURGER)
         self.assertEqual(destinos, {"TPZClasseNova"})
 
     def test_loop_nao_acusa_alucinacao_nem_queima_retry(self):
         llm = _LLMFalso("Segue:\n\n```cpp\nTPZBurger *mat = new TPZBurger(1, 2);\n```\n")
         db = _DBFalso()
-        with patch.object(pipeline, "_neopz_prefix", return_value=None), \
+        with patch.object(pipeline.validation, "_neopz_prefix", return_value=None), \
              patch.object(pipeline, "_compilar_codigo") as compilar, \
              redirect_stdout(io.StringIO()):
             r = pipeline.gerar_codigo(

@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cpp_parser import (
+from pipeline.cpp_parser import (
     build_class_whitelist,
     build_tiered_class_whitelist,
     extract_classes_from_header,

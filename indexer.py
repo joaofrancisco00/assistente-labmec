@@ -28,7 +28,7 @@ except ImportError:
 
 import json
 
-from cpp_parser import (
+from pipeline.cpp_parser import (
     DIRS_LEGADO,
     extract_classes_from_header,
     build_tiered_class_whitelist,

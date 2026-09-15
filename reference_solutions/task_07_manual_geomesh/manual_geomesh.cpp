@@ -17,7 +17,7 @@
 #include "pzmanvector.h"    // TPZManVector
 #include "pzgeoel.h"        // TPZGeoEl
 #include "pzgeoelbc.h"      // TPZGeoElBC
-#include "pzenumerate.h"    // ETriangle, EQuadrilateral, EOned
+#include "pzeltype.h"       // ETriangle, EQuadrilateral, EOned (MElementType)
 #include <iostream>
 
 int main() {

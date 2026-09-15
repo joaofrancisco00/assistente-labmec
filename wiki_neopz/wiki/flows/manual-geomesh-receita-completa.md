@@ -19,7 +19,7 @@ para malhas externas use `TPZGmshReader`.
 #include "pzmanvector.h"  // TPZManVector
 #include "pzgeoel.h"      // TPZGeoEl
 #include "pzgeoelbc.h"    // TPZGeoElBC
-#include "pzenumerate.h"  // ETriangle, EQuadrilateral, EOned, ETetraedro, …
+#include "pzeltype.h"      // ETriangle, EQuadrilateral, EOned, ETetraedro, …
 ```
 
 ---
@@ -103,7 +103,7 @@ gmesh->CreateGeoElement(ETriangle, triNodes, /*matid=*/1, index);
 > - `TPZTriangle::ClassId()` — retorna o id de serialização, não o tipo geométrico
 > - `TPZTriangle::Type()` — correto apenas em contexto template; prefira o enum direto
 >
-> O enum `ETriangle` já está disponível ao incluir `pzenumerate.h` (ou indiretamente
+> O enum `ETriangle` já está disponível ao incluir `pzeltype.h` (ou indiretamente
 > via `pzgmesh.h`).
 
 ### 4. Construir a conectividade
@@ -140,7 +140,7 @@ TPZGeoElBC(tri, 5, /*matIdBC=*/-1);
 #include "pzmanvector.h"
 #include "pzgeoel.h"
 #include "pzgeoelbc.h"
-#include "pzenumerate.h"
+#include "pzeltype.h"
 
 int main() {
     TPZGeoMesh *gmesh = new TPZGeoMesh();

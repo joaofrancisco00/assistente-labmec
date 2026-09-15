@@ -114,7 +114,7 @@ class TestCompilacaoDeVerdade(unittest.TestCase):
         # As 4 receitas são o padrão-ouro do projeto: se alguma parar de
         # compilar, a wiki gerada a partir dela ensina código quebrado
         receitas = sorted(RAIZ.glob("reference_solutions/task_*/*.cpp"))
-        self.assertEqual(len(receitas), 4, "esperado 4 receitas em reference_solutions/")
+        self.assertGreaterEqual(len(receitas), 4, "esperado pelo menos 4 receitas em reference_solutions/")
         for cpp in receitas:
             with self.subTest(receita=cpp.name):
                 r = pipeline._compilar_codigo(bloco(cpp.read_text(encoding="utf-8")))
