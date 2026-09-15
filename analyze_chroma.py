@@ -2,10 +2,7 @@ import json
 from pathlib import Path
 
 # Tentamos importar os embeddings do langchain do jeito atual
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings
-except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+from pipeline.config import HuggingFaceEmbeddings
 
 try:
     from langchain_chroma import Chroma

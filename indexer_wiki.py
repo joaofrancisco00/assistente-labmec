@@ -28,10 +28,7 @@ Execute UMA VEZ (ou sempre que a wiki for atualizada):
 import re
 from pathlib import Path
 
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings
-except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+from pipeline.config import HuggingFaceEmbeddings
 
 try:
     from langchain_chroma import Chroma

@@ -14,9 +14,31 @@ except ImportError:
         OllamaLLM = None
 
 try:
-    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_huggingface import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
 except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_community.embeddings import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
+
+_embeddings_cache = {}
+_global_embeddings = None
+
+class _CachedEmbeddings:
+    def __init__(self, base_embeddings):
+        self.base_embeddings = base_embeddings
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.base_embeddings.embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        if text not in _embeddings_cache:
+            _embeddings_cache[text] = self.base_embeddings.embed_query(text)
+        return _embeddings_cache[text]
+
+def HuggingFaceEmbeddings(*args, **kwargs):
+    global _global_embeddings
+    if _global_embeddings is None:
+        base = _HuggingFaceEmbeddings(*args, **kwargs)
+        _global_embeddings = _CachedEmbeddings(base)
+    return _global_embeddings
 
 try:
     from langchain_chroma import Chroma

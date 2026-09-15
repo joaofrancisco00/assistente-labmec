@@ -16,10 +16,7 @@ from tqdm import tqdm
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings
-except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+from pipeline.config import HuggingFaceEmbeddings
 
 try:
     from langchain_chroma import Chroma
