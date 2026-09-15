@@ -27,7 +27,7 @@ except ImportError:
 GEMINI_MODEL           = "gemini-3.6-flash"
 OLLAMA_MODEL           = "qwen2.5-coder:7b"
 
-NUM_CTX                = 8192
+NUM_CTX                = 16384
 
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 
