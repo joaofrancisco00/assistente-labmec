@@ -311,6 +311,56 @@ class TestLogDeInteracoes(unittest.TestCase):
             pipeline._registrar_interacao("pergunta", self.RESULTADO, caminho)  # não levanta
 
 
+class MockDB:
+    def __init__(self, docs_sim=None, docs_mmr=None):
+        self.docs_sim = docs_sim or []
+        self.docs_mmr = docs_mmr or []
+
+    def similarity_search(self, query, k=1, filter=None):
+        return self.docs_sim
+
+    def max_marginal_relevance_search(self, query, k=4, fetch_k=8):
+        return self.docs_mmr
+
+
+class TestRecuperarContexto(unittest.TestCase):
+    def test_fluxo_completo_ordena_corretamente(self):
+        from langchain_core.documents import Document
+        pergunta = "Como uso a TPZGeoMesh?"
+        
+        doc_header = Document(page_content="class TPZGeoMesh {};", metadata={"classe": "TPZGeoMesh", "source": "Mesh/pzgmesh.h"})
+        doc_header_irrelevante = Document(page_content="class TPZOutra {};", metadata={"classe": "TPZOutra", "source": "Outra.h"})
+        headers_db = MockDB(
+            docs_sim=[doc_header],
+            docs_mmr=[doc_header, doc_header_irrelevante]
+        )
+
+        doc_ex_bom = Document(page_content="TPZGeoMesh mesh;", metadata={"classes_usadas": "TPZGeoMesh", "source": "Examples/bom.cpp"})
+        doc_ex_legado = Document(page_content="TPZGeoMesh mesh2;", metadata={"classes_usadas": "TPZGeoMesh", "source": "Material/needrefactor/velho.cpp"})
+        examples_db = MockDB(docs_mmr=[doc_ex_legado, doc_ex_bom])
+
+        doc_wiki_teoria = Document(page_content="A malha é...", metadata={"tipo": "conceito", "classes_usadas": "TPZGeoMesh", "source": "wiki.md"})
+        doc_wiki_fluxo = Document(page_content="Tutorial enorme...", metadata={"tipo": "doc_fluxo", "classes_usadas": "TPZGeoMesh", "source": "tutorial.md"})
+        wiki_db = MockDB(docs_mmr=[doc_wiki_fluxo, doc_wiki_teoria])
+
+        h_docs, e_docs, w_docs, fontes = pipeline._recuperar_contexto(
+            pergunta, headers_db, examples_db, wiki_db, explicativa=True
+        )
+
+        # Headers: garante dedup
+        self.assertEqual(len(h_docs), 2)
+        self.assertEqual(h_docs[0].metadata["classe"], "TPZGeoMesh")
+        
+        # Exemplos: legado desce pro fim
+        self.assertEqual(len(e_docs), 2)
+        self.assertEqual(e_docs[0].metadata["source"], "Examples/bom.cpp")
+        self.assertEqual(e_docs[1].metadata["source"], "Material/needrefactor/velho.cpp")
+
+        # Wiki: doc_fluxo é banido na pergunta explicativa
+        self.assertEqual(len(w_docs), 1)
+        self.assertEqual(w_docs[0].metadata["tipo"], "conceito")
+
+
 class TestReservaDeVagasNaWiki(unittest.TestCase):
     def _doc(self, nome, tipo):
         from langchain_core.documents import Document
