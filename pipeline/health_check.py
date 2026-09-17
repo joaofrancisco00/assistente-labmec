@@ -1,38 +1,26 @@
 import json
 from pathlib import Path
 
-# Tentamos importar os embeddings do langchain do jeito atual
-from pipeline.config import HuggingFaceEmbeddings
-
 try:
     from langchain_chroma import Chroma
 except ImportError:
     from langchain_community.vectorstores import Chroma
 
-INDEX_DIR = Path("./banco_chroma_develop")
-EMBED_MODEL = "BAAI/bge-base-en-v1.5"
-
-def _carregar_embeddings():
-    return HuggingFaceEmbeddings(
-        model_name=EMBED_MODEL,
-        encode_kwargs={"normalize_embeddings": True},
-    )
-
-def analyze_collection(collection_name, embeddings):
+def _analyze_collection(collection_name, embeddings, index_dir):
     try:
         db = Chroma(
-            persist_directory=str(INDEX_DIR),
+            persist_directory=str(index_dir),
             embedding_function=embeddings,
             collection_name=collection_name,
         )
     except Exception as e:
-        print(f"Error loading {collection_name}: {e}")
+        print(f"  [HealthCheck] Error loading {collection_name}: {e}")
         return []
 
     try:
         data = db.get() # Get all ids, documents, metadatas
     except Exception as e:
-        print(f"Error getting data for {collection_name}: {e}")
+        print(f"  [HealthCheck] Error getting data for {collection_name}: {e}")
         return []
 
     documents = data.get("documents", [])
@@ -61,7 +49,6 @@ def analyze_collection(collection_name, embeddings):
         if collection_name == "neopz_examples":
             classes = meta.get("classes_usadas", "").strip()
             if not classes:
-                # Also check if it's mostly includes
                 lines = doc.splitlines()
                 include_lines = [l for l in lines if l.startswith("#include")]
                 if len(include_lines) == len([l for l in lines if l.strip()]):
@@ -87,20 +74,20 @@ def analyze_collection(collection_name, embeddings):
             
     return inefficient_chunks
 
-def main():
-    embeddings = _carregar_embeddings()
+def run_health_check(embeddings, index_dir: Path, log_dir: Path) -> list:
+    """Roda a análise de sanidade nas coleções e salva o resultado no diretório de logs.
+    Retorna a lista de anomalias encontradas."""
+    print(f"\n🩺 Iniciando Health Check do Banco de Dados...")
     all_inefficient = []
     
     for col in ["neopz_headers", "neopz_examples", "neopz_wiki"]:
-        print(f"Analyzing {col}...")
-        inefficient = analyze_collection(col, embeddings)
+        inefficient = _analyze_collection(col, embeddings, index_dir)
         all_inefficient.extend(inefficient)
-        print(f"Found {len(inefficient)} inefficient chunks in {col}.")
         
-    with open("tmp_scratch/analyze_chroma_results.json", "w", encoding="utf-8") as f:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    report_file = log_dir / "chroma_health.json"
+    
+    with open(report_file, "w", encoding="utf-8") as f:
         json.dump(all_inefficient, f, indent=2, ensure_ascii=False)
         
-    print("Done. Results saved to tmp_scratch/analyze_chroma_results.json")
-
-if __name__ == "__main__":
-    main()
+    return all_inefficient

@@ -123,6 +123,8 @@ from .cpp_parser import (
     find_suspicious_method_calls,
 )
 
+from .health_check import run_health_check
+
 
 def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INTERACOES_FILE):
     try:

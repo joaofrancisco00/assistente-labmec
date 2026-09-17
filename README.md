@@ -43,14 +43,14 @@ git checkout neopz-develop
 ./setup.sh
 ```
 
-Esse script cria o ambiente virtual Python (`venv/`), instala as bibliotecas
-necessárias e baixa o modelo `qwen2.5-coder:7b` no Ollama.
+Esse script instala o gerenciador de pacotes `uv` (se necessário), cria o ambiente virtual (`.venv`), instala as bibliotecas
+fixadas em `uv.lock` e baixa o modelo `qwen2.5-coder:7b` no Ollama.
 
 ### 4. Indexar o banco de dados
 
 ```bash
-venv/bin/python indexer.py        # indexa headers e exemplos do NeoPZ (~1 min)
-venv/bin/python indexer_wiki.py   # indexa a wiki curada (receitas e conceitos)
+uv run indexer.py        # indexa headers e exemplos do NeoPZ (~1 min)
+uv run indexer_wiki.py   # indexa a wiki curada (receitas e conceitos)
 ```
 
 > Se você recebeu a pasta do projeto **com** `banco_chroma_develop/` já
@@ -61,13 +61,13 @@ venv/bin/python indexer_wiki.py   # indexa a wiki curada (receitas e conceitos)
 **Terminal** (modo direto):
 
 ```bash
-venv/bin/python pipeline.py
+uv run pipeline.py
 ```
 
 **Interface web**:
 
 ```bash
-caffeinate -i venv/bin/python app.py
+caffeinate -i uv run app.py
 ```
 
 Acesse no navegador: `http://localhost:7860`
@@ -120,7 +120,7 @@ está organizada em 3 categorias:
 1. Escreva o `.cpp` em `reference_solutions/task_XX/`
 2. **Compile e execute** contra o NeoPZ (ver seção abaixo)
 3. Espelhe como `.md` em `wiki_neopz/wiki/flows/`
-4. Rode `venv/bin/python indexer_wiki.py`
+4. Rode `uv run indexer_wiki.py`
 
 ### Como adicionar uma renomeação de classe
 
@@ -132,7 +132,7 @@ na whitelist.
 Antes e depois de mudar prompt, receitas ou índice, rode:
 
 ```bash
-venv/bin/python eval_benchmark.py    # benchmark de código (~10 min)
+uv run eval_benchmark.py    # benchmark de código (~10 min)
 ```
 
 Acusa regressão silenciosa se a nota cair.
@@ -170,8 +170,8 @@ ser `✅ Nomes verificados`. **Falta de compilador nunca reprova uma resposta.**
 | Problema | Solução |
 |---|---|
 | "Connection refused" / resposta não sai | O Ollama não está rodando: abra o app ou `ollama serve` |
-| `whitelist.txt não encontrada` | Rode `venv/bin/python indexer.py` |
-| Wiki não usada nas respostas | Rode `venv/bin/python indexer_wiki.py` |
+| `whitelist.txt não encontrada` | Rode `uv run indexer.py` |
+| Wiki não usada nas respostas | Rode `uv run indexer_wiki.py` |
 | Respostas ignorando instruções | Confira o aviso de "Prompt grande" no terminal |
 | Respostas muito lentas | Feche aplicativos pesados para liberar RAM (ver Monitor de Atividade) |
 | Segundo usuário "travado" na web | É a fila: uma geração por vez |

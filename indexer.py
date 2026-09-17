@@ -328,5 +328,19 @@ def main():
     print("=" * 55)
 
 
+    from pipeline import run_health_check
+    from pathlib import Path
+    
+    anomalies = run_health_check(
+        embeddings=embeddings,
+        index_dir=INDEX_DIR,
+        log_dir=Path("logs")
+    )
+    if anomalies:
+        print(f"\n⚠️  Aviso: O Health Check detectou {len(anomalies)} chunks ineficientes/lixo no banco vetorial.")
+        print(f"   Verifique o relatório detalhado em: logs/chroma_health.json")
+    else:
+        print("\n✅ Saúde do banco de dados vetorial aprovada! Nenhum lixo detectado.")
+
 if __name__ == "__main__":
     main()

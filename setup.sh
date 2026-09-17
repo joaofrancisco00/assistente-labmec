@@ -8,21 +8,16 @@ echo "=============================================="
 echo "  Assistente LabMeC — setup"
 echo "=============================================="
 
-# ── Python + venv ─────────────────────────────────────────────────────────────
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "❌ python3 não encontrado. Instale o Python 3.10+ e rode de novo."
-    exit 1
+# ── uv + dependências ──────────────────────────────────────────────────────────
+if ! command -v uv >/dev/null 2>&1; then
+    echo "→ Instalando gerenciador de pacotes uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-if [ ! -d venv ]; then
-    echo "→ Criando ambiente virtual (venv/)..."
-    python3 -m venv venv
-fi
-
-echo "→ Instalando dependências Python (pode demorar na primeira vez)..."
-venv/bin/pip install --quiet --upgrade pip
-venv/bin/pip install --quiet -r requirements.txt
-echo "✅ Dependências instaladas"
+echo "→ Resolvendo dependências (uv sync)..."
+uv sync
+echo "✅ Dependências instaladas no .venv"
 
 # ── Ollama + modelo ───────────────────────────────────────────────────────────
 if ! command -v ollama >/dev/null 2>&1; then
@@ -56,8 +51,8 @@ else
     echo "⚠️  banco_chroma_develop/ ausente ou incompleto."
     if [ -d base_de_dados/neopz ]; then
         echo "   Snapshot do NeoPZ encontrado. Gere o índice com:"
-        echo "     venv/bin/python indexer.py"
-        echo "     venv/bin/python indexer_wiki.py"
+        echo "     uv run indexer.py"
+        echo "     uv run indexer_wiki.py"
     else
         echo "   E base_de_dados/neopz/ também não existe. Ou copie as duas"
         echo "   pastas de uma instalação pronta (Caminho A do README), ou"
@@ -69,7 +64,7 @@ fi
 echo
 echo "=============================================="
 echo "  Setup concluído! Para usar:"
-echo "    interface web:  caffeinate -i venv/bin/python app.py"
+echo "    interface web:  caffeinate -i uv run app.py"
 echo "                    (http://localhost:7860)"
-echo "    terminal:       venv/bin/python pipeline.py"
+echo "    terminal:       uv run pipeline.py"
 echo "=============================================="
