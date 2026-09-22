@@ -224,6 +224,9 @@ def main():
             "tentativas": resultado["tentativas"],
             "valido":     resultado["valido"],
         })
+        
+        # Respiro de 4s para evitar bater no limite de requisições da API gratuita do Gemini
+        time.sleep(4)
 
     print(f"\n{'=' * 60}")
     print(f"  RESULTADO: {total_checks - falhas}/{total_checks} verificações OK"
@@ -234,7 +237,7 @@ def main():
     saida.parent.mkdir(parents=True, exist_ok=True)
     saida.write_text(json.dumps({
         "quando":    datetime.datetime.now().isoformat(timespec="seconds"),
-        "modelo":    OLLAMA_MODEL,
+        "modelo":    getattr(llm, "model", "desconhecido"),
         "resultado": f"{total_checks - falhas}/{total_checks}",
         "casos":     resultados_eval,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
