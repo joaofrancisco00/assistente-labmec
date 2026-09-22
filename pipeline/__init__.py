@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import time
 from pathlib import Path
 
 from .config import (
@@ -107,6 +108,8 @@ from .prompt import (
     _classes_do_contexto,
 )
 
+from .semantic_check import validar_semantica
+
 from . import (
     config,
     loader,
@@ -137,6 +140,7 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
             "tentativas":            resultado["tentativas"],
             "correcoes_automaticas": resultado["correcoes_automaticas"],
             "alucinacoes":           resultado["alucinacoes"],
+            "erros_semanticos":      resultado.get("erros_semanticos", []),
             "includes_errados":      sorted(resultado["includes"].keys()),
             "metodos_suspeitos":     [f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]],
             "compilacao":            resultado.get("compilacao", {}).get("status", "nao_executada"),
@@ -195,6 +199,7 @@ def gerar_codigo(
     includes_por_classe = None
     metodos_suspeitos = None
     erros_compilacao = None
+    erros_semanticos = None
     compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
     correcoes_automaticas = []
     classes_legado_usadas = []
@@ -208,6 +213,8 @@ def gerar_codigo(
             "resposta":             resposta,
             "valido":               valido,
             "alucinacoes":          classes_alucinadas or [],
+            "erros_aridade":        erros_aridade or [],
+            "erros_semanticos":     erros_semanticos or [],
             "includes":             includes_errados or {},
             "includes_por_classe":  includes_por_classe or {},
             "metodos_suspeitos":    metodos_suspeitos or [],
@@ -240,6 +247,7 @@ def gerar_codigo(
             classes_alucinadas, includes_errados, includes_por_classe,
             metodos_suspeitos, methods_whitelist,
             erros_compilacao=erros_compilacao,
+            erros_semanticos=erros_semanticos,
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
             renames=renames,
             historico=historico,
@@ -286,7 +294,7 @@ def gerar_codigo(
                 resposta, whitelist, renames, destinos=whitelist_destino)
             correcoes_automaticas.extend(correcoes_classes)
 
-            metodos_suspeitos_pre_correcao = _validar_metodos(resposta, methods_whitelist, whitelist)
+            metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
             resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
                 resposta, metodos_suspeitos_pre_correcao, class_methods_index,
             )
@@ -305,11 +313,14 @@ def gerar_codigo(
         if tem_codigo:
             includes_errados = _validar_includes(resposta, headers_whitelist)
             includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
-            metodos_suspeitos = _validar_metodos(resposta, methods_whitelist, whitelist)
+            metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
+            erros_semanticos = validar_semantica(resposta)
         else:
             includes_errados = {}
             includes_por_classe = {}
             metodos_suspeitos = []
+            erros_aridade = []
+            erros_semanticos = []
 
         classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
 
@@ -317,7 +328,8 @@ def gerar_codigo(
                                  if tem_codigo else {})
 
         nomes_ok = not (classes_alucinadas or includes_errados
-                        or includes_por_classe or metodos_suspeitos)
+                        or includes_por_classe or metodos_suspeitos
+                        or erros_aridade or erros_semanticos)
 
         compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
         erros_compilacao = None
@@ -361,10 +373,19 @@ def gerar_codigo(
             print(f"  ⚠️  Header errado/faltando para classe: {includes_por_classe}")
         if metodos_suspeitos:
             print(f"  ⚠️  Métodos não encontrados: {metodos_suspeitos}")
+        if erros_aridade:
+            for erro in erros_aridade:
+                print(f"  ⚠️  Erro de Aridade: {erro}")
+        if erros_semanticos:
+            for erro in erros_semanticos:
+                print(f"  ⚠️  Erro Semântico: {erro}")
 
         if tentativa >= MAX_RETRIES + 1:
             print("  ⚠️  Limite de tentativas atingido.")
             break
+
+        print("  ⏳ Aguardando 3s antes de tentar novamente para poupar a API...")
+        time.sleep(3)
 
         classes_reforco = set()
         docs_semanticos = []
@@ -484,6 +505,10 @@ def main():
         if resultado["metodos_suspeitos"]:
             metodos_fmt = ", ".join(f"{c}::{m}" for c, m in resultado["metodos_suspeitos"])
             print(f"⚠️  Métodos não encontrados no NeoPZ (whitelist global): {metodos_fmt}")
+        if resultado.get("erros_semanticos"):
+            print("⚠️  Erros semânticos (violação de regras do domínio):")
+            for erro in resultado["erros_semanticos"]:
+                print(f"   - {erro}")
         if resultado["compilacao"]["erros"]:
             print("❌ O compilador recusou o código (erro que a checagem de nomes não pega):")
             for e in resultado["compilacao"]["erros"]:

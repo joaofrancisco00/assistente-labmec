@@ -71,7 +71,9 @@ def _montar_prompt(
     includes_por_classe: dict = None,
     metodos_suspeitos: list = None,
     methods_whitelist: set = None,
+    erros_aridade: list = None,
     erros_compilacao: list = None,
+    erros_semanticos: list = None,
     classes_contexto: set = None,
     renames: dict = None,
     historico: list = None,
@@ -149,6 +151,13 @@ def _montar_prompt(
             + "\nNÃO use um método só porque parece lógico — confira nas declarações de classe do contexto."
         )
 
+    if erros_aridade:
+        instrucao_correcao += (
+            "\n\n⚠️ ERRO DE ARIDADE (NÚMERO DE ARGUMENTOS ERRADO):\n"
+            + "\n".join(f"  - {e}" for e in erros_aridade)
+            + "\nVerifique a assinatura correta do método nas declarações de classe fornecidas."
+        )
+
     if erros_compilacao:
         instrucao_correcao += (
             "\n\n❌ O COMPILADOR (g++) RECUSOU O CÓDIGO ANTERIOR:\n"
@@ -158,6 +167,14 @@ def _montar_prompt(
             "NÃO pertence à classe Y — mesmo que exista em OUTRA classe do NeoPZ.\n"
             "Use somente os métodos que aparecem na declaração da própria classe,\n"
             "no contexto acima. Não troque o método por outro 'parecido' sem conferir."
+        )
+
+    if erros_semanticos:
+        instrucao_correcao += (
+            "\n\n⚠️ ERRO SEMÂNTICO (REGRAS DO NEOPZ VIOLADAS):\n"
+            + "\n".join(f"  - {e}" for e in erros_semanticos)
+            + "\nO código anterior possui erros de modelagem ou física, que não foram pegos pelo compilador.\n"
+            "Siga rigorosamente as instruções acima na próxima resposta."
         )
 
     if instrucao_correcao:

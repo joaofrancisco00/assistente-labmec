@@ -148,7 +148,7 @@ def _indexar_headers(embeddings, chunks_por_arquivo: dict):
                     "source":  chunk.file_path,
                     "tipo":    "class_header",
                     "classe":  chunk.class_name,
-                    "metodos": ", ".join(chunk.methods[:8]),
+                    "metodos": ", ".join(m["name"] if isinstance(m, dict) else m for m in chunk.methods[:8]),
                 }
             ))
 

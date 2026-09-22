@@ -2,7 +2,7 @@
 Interface web do Assistente LabMeC (Gradio).
 
 Uso:
-    venv/bin/python app.py
+    uv run app.py
     # local:   http://localhost:7860
     # na rede: http://<ip-desta-maquina>:7860   (alunos do laboratório)
 
@@ -25,11 +25,10 @@ from pipeline import (
     OLLAMA_MODEL,
     NUM_CTX,
     TEMPERATURE,
-    OllamaLLM,
-    HuggingFaceEmbeddings,
     EMBED_MODEL,
     gerar_codigo,
     _registrar_interacao,
+    obter_llm,
 )
 
 # ── Carga única (modelos, índices, whitelists) ─────────────────────────────────
@@ -48,7 +47,7 @@ _class_methods_index = pipeline._carregar_class_methods_index()
 _renames             = pipeline._carregar_renames()
 _legacy_classes      = pipeline._carregar_legacy_classes()
 _system_base         = pipeline._carregar_system_prompt()
-_llm                 = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+_llm                 = obter_llm()
 print("Pronto.\n")
 
 
@@ -64,6 +63,10 @@ def _rodape(resultado: dict) -> str:
     compilacao = resultado.get("compilacao", {"status": "nao_executada", "erros": []})
 
     if not resultado["valido"]:
+        if resultado.get("erros_semanticos"):
+            linhas.append("⚠️ **Erros Semânticos**: " + " | ".join(resultado["erros_semanticos"]))
+        if resultado.get("erros_aridade"):
+            linhas.append("⚠️ **Erros de Assinatura (Aridade)**: " + " | ".join(resultado["erros_aridade"]))
         if resultado["alucinacoes"]:
             linhas.append("⚠️ **Classes não verificadas**: " + ", ".join(resultado["alucinacoes"]))
         if resultado["includes"]:
@@ -81,11 +84,9 @@ def _rodape(resultado: dict) -> str:
             linhas.append("❌ **O compilador recusou o código**:\n" + "\n".join(
                 f"- `{e}`" for e in compilacao["erros"]))
     elif compilacao["status"] == "ok":
-        linhas.append("✅ **Compilado** — o g++ aceitou o código: classes, métodos e "
-                      "assinaturas existem de verdade (o resultado físico não é verificado)")
+        linhas.append("✅ **Compilado e Verificado** — o g++ aceitou o código, assinaturas conferem e a semântica de modelagem está correta.")
     else:
-        linhas.append("✅ **Nomes verificados** — classes, headers e métodos existem no NeoPZ "
-                      "(semântica e assinaturas não são checadas)")
+        linhas.append("✅ **Nomes e Assinaturas verificados** — classes, headers, métodos e aridade existem de fato no NeoPZ.")
 
     if resultado["classes_legado"]:
         dicas = [f"{c} → prefira {_renames[c]}" if c in _renames else c
@@ -216,15 +217,31 @@ def responder(mensagem, historico_ui):
 
 # ── App ────────────────────────────────────────────────────────────────────────
 
+_theme = gr.themes.Soft(
+    primary_hue="indigo",
+    secondary_hue="slate",
+    neutral_hue="slate",
+)
+
 demo = gr.ChatInterface(
     responder,
     title="🤖 Assistente LabMeC — NeoPZ",
+    chatbot=gr.Chatbot(
+        render_markdown=True,
+        avatar_images=[None, "🤖"],
+        height=600,
+    ),
+    textbox=gr.Textbox(
+        placeholder="Ex: Como crio uma malha bidimensional com TPZGeoMeshTools?",
+        container=False,
+        scale=7,
+    ),
+    fill_height=True,
     description=(
         "Assistente de código para a biblioteca **NeoPZ**, com validação "
-        "anti-alucinação: classes, headers e métodos são conferidos contra o "
-        "código-fonte real. O rodapé de cada resposta mostra o resultado da "
-        "validação e as fontes usadas. *Semântica e assinaturas não são "
-        "checadas — revise o código antes de usar.*"
+        "rigorosa: classes, headers, métodos, nº de argumentos e regras "
+        "semânticas são conferidos contra o código-fonte real, além de passar "
+        "pelo compilador g++. O rodapé mostra o resultado detalhado da validação."
     ),
     examples=[
         "Crie uma malha geométrica 2D usando TPZGeoMeshTools e depois uma malha computacional com TPZCompMesh para resolver um problema de Poisson. Mostre o código completo com todos os includes necessários.",
@@ -234,10 +251,8 @@ demo = gr.ChatInterface(
     ],
 )
 
-# Habilita os botões 👍/👎 nas respostas (o listener .like faz o Gradio
-# exibi-los). Precisa ser anexado DENTRO do contexto do Blocks (Gradio 6).
-# Protegido: se a API mudar numa versão futura, o app sobe sem feedback em
-# vez de quebrar.
+# Habilita os botões 👍/👎 nas respostas. Protegido: se a API mudar numa
+# versão futura, o app sobe sem feedback em vez de quebrar.
 try:
     with demo:
         demo.chatbot.like(_registrar_feedback)
@@ -245,4 +260,7 @@ except Exception as _e:
     print(f"⚠️  Botões de feedback indisponíveis nesta versão do Gradio: {_e}")
 
 if __name__ == "__main__":
-    demo.queue(default_concurrency_limit=1).launch(server_name="0.0.0.0", server_port=7860)
+    demo.queue(default_concurrency_limit=1).launch(
+        server_name="0.0.0.0", server_port=7860, theme=_theme,
+    )
+

@@ -176,10 +176,11 @@ class TestContrasteComWhitelist(unittest.TestCase):
         codigo = ('#include "DarcyFlow/TPZDarcyFlow.h"\n'
                   'auto *mat = new TPZDarcyFlow(1, 2);\n'
                   'mat->SetElasticity(2.e3, 0.3);')
-        aprovado_pela_whitelist = pipeline._validar_metodos(
+        aprovado_pela_whitelist, _ = pipeline._validar_metodos(
             codigo,
             pipeline._carregar_methods_whitelist(),
             pipeline._carregar_whitelist(),
+            pipeline._carregar_class_methods_index(),
         )
         self.assertEqual(aprovado_pela_whitelist, [])
         self.assertEqual(pipeline._compilar_codigo(bloco(codigo))["status"], "erros")

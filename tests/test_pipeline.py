@@ -499,7 +499,8 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         contém SetElasticity de propósito: é o ponto do teste que a validação
         de nomes APROVA a chamada."""
         db = _DBFalso()
-        with redirect_stdout(io.StringIO()):
+        with redirect_stdout(io.StringIO()), \
+             patch.object(pipeline, "validar_semantica", return_value=[]):
             return pipeline.gerar_codigo(
                 "material de darcy", llm, db, db,
                 whitelist={"TPZDarcyFlow"},

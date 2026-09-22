@@ -21,7 +21,8 @@ class ClassChunk:
             f"// Arquivo: {self.file_path}",
         ]
         if self.methods:
-            lines.append(f"// Métodos públicos: {', '.join(self.methods[:10])}")
+            nomes = [m["name"] if isinstance(m, dict) else m for m in self.methods[:10]]
+            lines.append(f"// Métodos públicos: {', '.join(nomes)}")
         lines.append("")
         lines.append(self.content)
         return "\n".join(lines)
@@ -146,10 +147,43 @@ def _scan_matching_paren(text: str, open_pos: int) -> int:
 _METHOD_TAIL_RE = re.compile(r'\s*(?:const\s*)?(?:override\s*)?(?:=\s*0\s*)?[;{]')
 
 
-def _extract_method_names(content: str) -> list:
-    """Extrai nomes de métodos (declarações puras + definidas inline no header),
+def _parse_arity(args_str: str) -> tuple[int, int]:
+    args_str = args_str.strip()
+    if not args_str or args_str == "void":
+        return 0, 0
+    
+    depth = 0
+    total_args = 1
+    defaults = 0
+    
+    i = 0
+    n = len(args_str)
+    has_default = False
+    
+    while i < n:
+        c = args_str[i]
+        if c in '<([':
+            depth += 1
+        elif c in '>)]':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            total_args += 1
+            if has_default:
+                defaults += 1
+                has_default = False
+        elif c == '=' and depth == 0:
+            has_default = True
+        i += 1
+        
+    if has_default:
+        defaults += 1
+        
+    return total_args - defaults, total_args
+
+def _extract_method_names(content: str) -> list[dict]:
+    """Extrai nomes e assinaturas de métodos (declarações puras + definidas inline no header),
     com parênteses de parâmetros corretamente balanceados (ver _scan_matching_paren)."""
-    names = []
+    methods = {}
     for m in _METHOD_NAME_START_RE.finditer(content):
         name = m.group(1).strip()
         if not name or name in _METHOD_BLACKLIST or name[0].isdigit():
@@ -161,8 +195,17 @@ def _extract_method_names(content: str) -> list:
         tail = content[paren_close + 1:paren_close + 60]
         if not _METHOD_TAIL_RE.match(tail):
             continue
-        names.append(name)
-    return list(dict.fromkeys(names))  # mantém ordem, sem duplicatas
+            
+        args_str = content[paren_open + 1:paren_close]
+        min_a, max_a = _parse_arity(args_str)
+        
+        if name in methods:
+            methods[name]["min_args"] = min(methods[name]["min_args"], min_a)
+            methods[name]["max_args"] = max(methods[name]["max_args"], max_a)
+        else:
+            methods[name] = {"name": name, "min_args": min_a, "max_args": max_a}
+            
+    return list(methods.values())
 
 
 # ── Declarações que NÃO são class/struct (mesmo bug, escopo maior) ──────────────
@@ -389,7 +432,11 @@ def build_method_whitelist_from_chunks(chunks) -> set:
     """
     methods = set()
     for chunk in chunks:
-        methods.update(chunk.methods)
+        for m in chunk.methods:
+            if isinstance(m, dict):
+                methods.add(m["name"])
+            else:
+                methods.add(m)
     return methods
 
 
@@ -441,10 +488,16 @@ def build_class_methods_index_from_chunks(chunks) -> dict:
     for chunk in chunks:
         if not chunk.methods:
             continue
-        existentes = index.setdefault(chunk.class_name, [])
+        existentes = index.setdefault(chunk.class_name, {})
         for m in chunk.methods:
-            if m not in existentes:
-                existentes.append(m)
+            if isinstance(m, str):
+                continue
+            name = m["name"]
+            if name in existentes:
+                existentes[name]["min_args"] = min(existentes[name]["min_args"], m["min_args"])
+                existentes[name]["max_args"] = max(existentes[name]["max_args"], m["max_args"])
+            else:
+                existentes[name] = {"min_args": m["min_args"], "max_args": m["max_args"]}
     return index
 
 
@@ -489,7 +542,34 @@ def _bind_variables_to_classes(code: str) -> dict:
     return bindings
 
 
-def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None) -> list:
+def _count_call_args(code: str, open_pos: int) -> int:
+    """Conta os argumentos de uma chamada de método a partir da posição do '('."""
+    close_pos = _scan_matching_paren(code, open_pos)
+    if close_pos == -1:
+        return 0
+    args_str = code[open_pos + 1:close_pos].strip()
+    if not args_str:
+        return 0
+    
+    depth = 0
+    commas = 0
+    i = 0
+    n = len(args_str)
+    
+    while i < n:
+        c = args_str[i]
+        if c in '<([':
+            depth += 1
+        elif c in '>)]':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            commas += 1
+        i += 1
+        
+    return commas + 1
+
+
+def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None, class_methods_index: dict = None) -> tuple[list, list]:
     """
     Retorna uma lista de (variavel_ou_classe, metodo) para chamadas de método
     que:
@@ -505,13 +585,14 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
     (ex: vetor.push_back(x) não é NeoPZ, não deveria ser sinalizado).
     """
     if not method_whitelist:
-        return []
+        return [], []
 
     class_whitelist = class_whitelist or set()
     bindings = _bind_variables_to_classes(code)
 
-    suspeitos = []
-    seen = set()
+    suspeitos_nome = []
+    suspeitos_aridade = []
+    seen_nome = set()
 
     for var, method in _METHOD_CALL_RE.findall(code):
         cls = bindings.get(var)
@@ -523,19 +604,50 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
             continue
         if method not in method_whitelist:
             key = (cls, method)
-            if key not in seen:
-                seen.add(key)
-                suspeitos.append(key)
+            if key not in seen_nome:
+                seen_nome.add(key)
+                suspeitos_nome.append(key)
+        elif class_methods_index and cls in class_methods_index and method in class_methods_index[cls]:
+            arity = class_methods_index[cls][method]
+            min_args = arity["min_args"]
+            max_args = arity["max_args"]
+            call_args = _count_call_args(code, open_pos)
+            
+            if call_args < min_args or call_args > max_args:
+                if min_args == max_args:
+                    msg = f"{cls}::{method} espera exatamente {min_args} argumento(s), mas recebeu {call_args}."
+                else:
+                    msg = f"{cls}::{method} espera entre {min_args} e {max_args} argumentos, mas recebeu {call_args}."
+                
+                if msg not in suspeitos_aridade:
+                    suspeitos_aridade.append(msg)
 
-    for cls, method in _QUALIFIED_CALL_RE.findall(code):
+    for m in _QUALIFIED_CALL_RE.finditer(code):
+        cls = m.group(1)
+        method = m.group(2)
+        open_pos = m.end() - 1
         if cls not in class_whitelist:
             continue  # classe já é desconhecida — isso é alucinação de classe, não de método
         if method in (cls, f"~{cls}"):
             continue
         if method not in method_whitelist:
             key = (cls, method)
-            if key not in seen:
-                seen.add(key)
-                suspeitos.append(key)
+            if key not in seen_nome:
+                seen_nome.add(key)
+                suspeitos_nome.append(key)
+        elif class_methods_index and cls in class_methods_index and method in class_methods_index[cls]:
+            arity = class_methods_index[cls][method]
+            min_args = arity["min_args"]
+            max_args = arity["max_args"]
+            call_args = _count_call_args(code, open_pos)
+            
+            if call_args < min_args or call_args > max_args:
+                if min_args == max_args:
+                    msg = f"{cls}::{method} espera exatamente {min_args} argumento(s), mas recebeu {call_args}."
+                else:
+                    msg = f"{cls}::{method} espera entre {min_args} e {max_args} argumentos, mas recebeu {call_args}."
+                
+                if msg not in suspeitos_aridade:
+                    suspeitos_aridade.append(msg)
 
-    return suspeitos
+    return suspeitos_nome, suspeitos_aridade

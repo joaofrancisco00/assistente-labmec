@@ -110,7 +110,7 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
             faltando[classe] = forma_certa
     return faltando
 
-def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set) -> list:
+def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set, class_methods_index: dict) -> tuple[list, list]:
     if not methods_whitelist:
-        return []
-    return find_suspicious_method_calls(codigo, methods_whitelist, whitelist)
+        return [], []
+    return find_suspicious_method_calls(codigo, methods_whitelist, whitelist, class_methods_index)

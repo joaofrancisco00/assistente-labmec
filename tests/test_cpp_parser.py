@@ -48,8 +48,9 @@ public:
 };
 """)
         self.assertEqual(len(chunks), 1)
-        self.assertIn("SetExact", chunks[0].methods)
-        self.assertIn("Run", chunks[0].methods)
+        nomes = [m["name"] for m in chunks[0].methods]
+        self.assertIn("SetExact", nomes)
+        self.assertIn("Run", nomes)
 
     def test_asterisco_colado_no_nome(self):
         # Estilo dominante no NeoPZ: `TPZGeoMesh *Metodo(...)` — com o
@@ -60,7 +61,8 @@ namespace TPZGeoMeshTools {
 }
 """)
         self.assertEqual(chunks[0].class_name, "TPZGeoMeshTools")
-        self.assertIn("CreateGeoMeshOnGrid", chunks[0].methods)
+        nomes = [m["name"] for m in chunks[0].methods]
+        self.assertIn("CreateGeoMeshOnGrid", nomes)
 
     def test_referencia_colada_no_nome(self):
         # Mesmo bug do asterisco, com retorno por referência (`&Solution()`)
@@ -70,7 +72,8 @@ public:
     TPZFMatrix<STATE> &Solution();
 };
 """)
-        self.assertIn("Solution", chunks[0].methods)
+        nomes = [m["name"] for m in chunks[0].methods]
+        self.assertIn("Solution", nomes)
 
 
 class TestWhitelistDeClasses(unittest.TestCase):
@@ -121,22 +124,23 @@ class TestChamadasSuspeitas(unittest.TestCase):
         # Regressão: `TPZGeoMesh mesh;` não vinculava a variável a nada e
         # qualquer método inventado chamado nela passava batido
         codigo = "TPZGeoMesh mesh;\nmesh.GenerateMesh();\nmesh.Print();"
-        suspeitos = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
-        self.assertIn(("TPZGeoMesh", "GenerateMesh"), suspeitos)
-        self.assertNotIn(("TPZGeoMesh", "Print"), suspeitos)
+        suspeitos_nome, _ = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
+        self.assertIn(("TPZGeoMesh", "GenerateMesh"), suspeitos_nome)
+        self.assertNotIn(("TPZGeoMesh", "Print"), suspeitos_nome)
 
     def test_stl_nao_e_sinalizada(self):
         # vetor.push_back() não é NeoPZ — não deve virar falso positivo
         codigo = "std::vector<int> v;\nv.push_back(1);"
-        self.assertEqual(
-            find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES), [])
+        suspeitos_nome, suspeitos_aridade = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
+        self.assertEqual(suspeitos_nome, [])
+        self.assertEqual(suspeitos_aridade, [])
 
     def test_chamada_qualificada(self):
         codigo = ("TPZGeoMeshTools::CreateRectMesh(2);\n"
                   "TPZGeoMeshTools::CreateGeoMeshOnGrid(2);")
-        suspeitos = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
-        self.assertIn(("TPZGeoMeshTools", "CreateRectMesh"), suspeitos)
-        self.assertNotIn(("TPZGeoMeshTools", "CreateGeoMeshOnGrid"), suspeitos)
+        suspeitos_nome, _ = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
+        self.assertIn(("TPZGeoMeshTools", "CreateRectMesh"), suspeitos_nome)
+        self.assertNotIn(("TPZGeoMeshTools", "CreateGeoMeshOnGrid"), suspeitos_nome)
 
 
 if __name__ == "__main__":
