@@ -25,3 +25,4 @@ reference_solutions/build/
 .cache/
 
 teste_prosa.py
+.env
