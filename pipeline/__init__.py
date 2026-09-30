@@ -127,6 +127,7 @@ from .cpp_parser import (
 )
 
 from .health_check import run_health_check
+from .context import PipelineContext
 
 
 def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INTERACOES_FILE):
@@ -167,23 +168,37 @@ def _emitir(on_evento, tipo: str, texto: str):
 
 def gerar_codigo(
     pergunta: str,
-    llm,
-    headers_db,
-    examples_db,
-    whitelist: set,
-    headers_whitelist: set,
-    system_base: str,
-    class_header_index: dict = None,
-    collisions: dict = None,
-    wiki_db=None,
-    methods_whitelist: set = None,
-    class_methods_index: dict = None,
-    renames: dict = None,
-    legacy_classes: set = None,
+    ctx: PipelineContext = None,
+    *,
     historico: list = None,
     on_evento=None,
+    # ── Parâmetros legados (retrocompatibilidade com testes unitários) ──
+    # Se `ctx` for passado, estes são IGNORADOS. Se `ctx` for None,
+    # eles são usados para montar um contexto ad-hoc.
+    llm=None, headers_db=None, examples_db=None,
+    whitelist: set = None, headers_whitelist: set = None,
+    system_base: str = None, class_header_index: dict = None,
+    collisions: dict = None, wiki_db=None,
+    methods_whitelist: set = None, class_methods_index: dict = None,
+    renames: dict = None, legacy_classes: set = None,
 ) -> dict:
     import difflib
+
+    # ── Resolver contexto: PipelineContext ou kwargs legados ────────────
+    if ctx is not None:
+        llm                = ctx.llm
+        headers_db         = ctx.headers_db
+        examples_db        = ctx.examples_db
+        wiki_db            = ctx.wiki_db
+        whitelist          = ctx.whitelist
+        headers_whitelist  = ctx.headers_whitelist
+        methods_whitelist  = ctx.methods_whitelist
+        class_header_index = ctx.class_header_index
+        class_methods_index = ctx.class_methods_index
+        collisions         = ctx.collisions
+        renames            = ctx.renames
+        legacy_classes     = ctx.legacy_classes
+        system_base        = ctx.system_base
 
     class_header_index = class_header_index or {}
     collisions = collisions or {}
@@ -439,24 +454,7 @@ def obter_llm():
 
 
 def main():
-    print("Carregando modelos e banco de dados...")
-
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBED_MODEL,
-        encode_kwargs={"normalize_embeddings": True},
-    )
-
-    headers_db, examples_db, wiki_db = _carregar_bancos(embeddings)
-    whitelist          = _carregar_whitelist()
-    headers_whitelist  = _carregar_headers_whitelist()
-    class_header_index = _carregar_class_header_index()
-    collisions         = _carregar_collisions()
-    methods_whitelist  = _carregar_methods_whitelist()
-    class_methods_index = _carregar_class_methods_index()
-    renames            = _carregar_renames()
-    legacy_classes     = _carregar_legacy_classes()
-    system_base        = _carregar_system_prompt()
-    llm                = obter_llm()
+    ctx = PipelineContext.load()
 
     print("\n" + "=" * 50)
     print("  🤖 Assistente LabMeC Pronto!")
@@ -477,14 +475,7 @@ def main():
 
         print("\n[Pensando: buscando documentação e gerando resposta...]")
 
-        resultado = gerar_codigo(
-            pergunta, llm, headers_db, examples_db,
-            whitelist, headers_whitelist, system_base,
-            class_header_index, collisions, wiki_db,
-            methods_whitelist, class_methods_index,
-            renames, legacy_classes,
-            historico=historico,
-        )
+        resultado = gerar_codigo(pergunta, ctx, historico=historico)
 
         historico.append((pergunta, resultado["resposta"]))
         del historico[:-6]
@@ -515,7 +506,7 @@ def main():
                 print(f"   - {e}")
         if resultado["classes_legado"]:
             dicas = [
-                f"{c} → prefira {renames[c]}" if c in renames else c
+                f"{c} → prefira {ctx.renames[c]}" if c in ctx.renames else c
                 for c in resultado["classes_legado"]
             ]
             print(f"⚠️  API antiga ({'/'.join(_DIRS_LEGADO)}) usada: {', '.join(dicas)}")

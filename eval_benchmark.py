@@ -173,22 +173,9 @@ CASOS = [
 
 
 def main():
-    print("Carregando modelos e banco de dados...")
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBED_MODEL,
-        encode_kwargs={"normalize_embeddings": True},
-    )
-    headers_db, examples_db, wiki_db = pipeline._carregar_bancos(embeddings)
-    whitelist           = pipeline._carregar_whitelist()
-    headers_whitelist   = pipeline._carregar_headers_whitelist()
-    class_header_index  = pipeline._carregar_class_header_index()
-    collisions          = pipeline._carregar_collisions()
-    methods_whitelist   = pipeline._carregar_methods_whitelist()
-    class_methods_index = pipeline._carregar_class_methods_index()
-    renames             = pipeline._carregar_renames()
-    legacy_classes      = pipeline._carregar_legacy_classes()
-    system_base         = pipeline._carregar_system_prompt()
-    llm                 = obter_llm()
+    from pipeline.context import PipelineContext
+    ctx = PipelineContext.load()
+    llm = ctx.llm
 
     resultados_eval = []
     total_checks = falhas = 0
@@ -197,13 +184,7 @@ def main():
         print(f"\n{'=' * 60}\n▶ {caso['nome']}\n{'=' * 60}")
         import time
         start_time = time.time()
-        resultado = gerar_codigo(
-            caso["pergunta"], llm, headers_db, examples_db,
-            whitelist, headers_whitelist, system_base,
-            class_header_index, collisions, wiki_db,
-            methods_whitelist, class_methods_index,
-            renames, legacy_classes,
-        )
+        resultado = gerar_codigo(caso["pergunta"], ctx)
         elapsed = time.time() - start_time
         print(f"⏱️ Tempo da resposta: {elapsed:.2f}s")
         resultado["tempo_s"] = elapsed

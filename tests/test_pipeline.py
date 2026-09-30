@@ -502,7 +502,8 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         with redirect_stdout(io.StringIO()), \
              patch.object(pipeline, "validar_semantica", return_value=[]):
             return pipeline.gerar_codigo(
-                "material de darcy", llm, db, db,
+                "material de darcy",
+                llm=llm, headers_db=db, examples_db=db,
                 whitelist={"TPZDarcyFlow"},
                 headers_whitelist={"TPZDarcyFlow.h"},
                 system_base="sistema",
@@ -665,7 +666,8 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
              patch.object(pipeline, "_compilar_codigo") as compilar, \
              redirect_stdout(io.StringIO()):
             r = pipeline.gerar_codigo(
-                "equação de convecção", llm, db, db,
+                "equação de convecção",
+                llm=llm, headers_db=db, examples_db=db,
                 whitelist={"TPZBurger"},
                 headers_whitelist={"pzburger.h"},
                 system_base="sistema",

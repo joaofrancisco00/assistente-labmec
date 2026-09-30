@@ -32,23 +32,8 @@ from pipeline import (
 )
 
 # ── Carga única (modelos, índices, whitelists) ─────────────────────────────────
-print("Carregando modelos e banco de dados (uma vez, na subida do app)...")
-_embeddings = HuggingFaceEmbeddings(
-    model_name=EMBED_MODEL,
-    encode_kwargs={"normalize_embeddings": True},
-)
-_headers_db, _examples_db, _wiki_db = pipeline._carregar_bancos(_embeddings)
-_whitelist           = pipeline._carregar_whitelist()
-_headers_whitelist   = pipeline._carregar_headers_whitelist()
-_class_header_index  = pipeline._carregar_class_header_index()
-_collisions          = pipeline._carregar_collisions()
-_methods_whitelist   = pipeline._carregar_methods_whitelist()
-_class_methods_index = pipeline._carregar_class_methods_index()
-_renames             = pipeline._carregar_renames()
-_legacy_classes      = pipeline._carregar_legacy_classes()
-_system_base         = pipeline._carregar_system_prompt()
-_llm                 = obter_llm()
-print("Pronto.\n")
+from pipeline.context import PipelineContext
+_ctx = PipelineContext.load()
 
 
 # ── Formatação da resposta final ───────────────────────────────────────────────
@@ -89,7 +74,7 @@ def _rodape(resultado: dict) -> str:
         linhas.append("✅ **Nomes e Assinaturas verificados** — classes, headers, métodos e aridade existem de fato no NeoPZ.")
 
     if resultado["classes_legado"]:
-        dicas = [f"{c} → prefira {_renames[c]}" if c in _renames else c
+        dicas = [f"{c} → prefira {_ctx.renames[c]}" if c in _ctx.renames else c
                  for c in resultado["classes_legado"]]
         linhas.append("⚠️ **API antiga usada**: " + ", ".join(dicas))
 
@@ -172,11 +157,7 @@ def responder(mensagem, historico_ui):
     def trabalhar():
         try:
             resultado = gerar_codigo(
-                mensagem, _llm, _headers_db, _examples_db,
-                _whitelist, _headers_whitelist, _system_base,
-                _class_header_index, _collisions, _wiki_db,
-                _methods_whitelist, _class_methods_index,
-                _renames, _legacy_classes,
+                mensagem, _ctx,
                 historico=pares,
                 on_evento=lambda tipo, texto: fila.put((tipo, texto)),
             )
