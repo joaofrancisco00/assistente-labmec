@@ -594,7 +594,9 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
     suspeitos_aridade = []
     seen_nome = set()
 
-    for var, method in _METHOD_CALL_RE.findall(code):
+    for m in _METHOD_CALL_RE.finditer(code):
+        var, method = m.group(1), m.group(2)
+        open_pos = m.end() - 1
         cls = bindings.get(var)
         if not cls:
             continue
