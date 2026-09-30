@@ -30,6 +30,7 @@ from pipeline import (
     _registrar_interacao,
     obter_llm,
 )
+from pipeline.agent import gerar_codigo_agente
 
 # ── Carga única (modelos, índices, whitelists) ─────────────────────────────────
 from pipeline.context import PipelineContext
@@ -135,7 +136,7 @@ def _registrar_feedback(data: gr.LikeData):
 
 # ── Função de chat (generator: streaming na interface) ─────────────────────────
 
-def responder(mensagem, historico_ui):
+def responder(mensagem, historico_ui, usar_agente=False):
     # histórico do Gradio (messages) -> pares (pergunta, resposta) do pipeline
     pares = []
     pergunta_anterior = None
@@ -156,11 +157,18 @@ def responder(mensagem, historico_ui):
 
     def trabalhar():
         try:
-            resultado = gerar_codigo(
-                mensagem, _ctx,
-                historico=pares,
-                on_evento=lambda tipo, texto: fila.put((tipo, texto)),
-            )
+            if usar_agente:
+                resultado = gerar_codigo_agente(
+                    mensagem, _ctx,
+                    historico=pares,
+                    on_evento=lambda tipo, texto: fila.put((tipo, texto)),
+                )
+            else:
+                resultado = gerar_codigo(
+                    mensagem, _ctx,
+                    historico=pares,
+                    on_evento=lambda tipo, texto: fila.put((tipo, texto)),
+                )
             resultado_final.update(resultado)
         except Exception as e:
             fila.put(("erro", f"{type(e).__name__}: {e}"))
@@ -229,6 +237,9 @@ demo = gr.ChatInterface(
         "Escreva um código completo em C++ com NeoPZ para resolver um problema de elasticidade linear 2D, com todos os includes necessários.",
         "Escreva um código completo em C++ com NeoPZ para resolver um problema de Darcy 2D na formulação mista (fluxo e pressão), com todos os includes necessários.",
         "O que é a classe TPZGeoMesh e para que ela serve?",
+    ],
+    additional_inputs=[
+        gr.Checkbox(label="Usar Agente Autônomo (O LLM pesquisa e compila o código sozinho antes de responder)", value=False)
     ],
 )
 
