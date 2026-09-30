@@ -1,0 +1,30 @@
+rules:
+  - nome: "Elasticidade 2D - Construtor Completo"
+    padrao: '\bTPZElasticity2D\b'
+    requer: 'TPZElasticity2D\s*\([^)]*,[^)]*,[^)]*,[^)]*,[^)]*,[^)]*\)'
+    incompativel_com: '\bSetElasticity\b'
+    aviso: "Para TPZElasticity2D, use sempre o construtor completo com 6 argumentos (id, E, nu, fx, fy, planestress) e NUNCA use SetElasticity(), pois ele não inicializa a lei constitutiva."
+
+  - nome: "Darcy Misto - Malha Multifísica"
+    padrao: '\bTPZMixedDarcyFlow\b|\bTPZMultiphysicsCompMesh\b'
+    requer: '\bBuildMultiphysicsSpace\b'
+    incompativel_com: null
+    aviso: "Na formulação mista (TPZMixedDarcyFlow / TPZMultiphysicsCompMesh), você DEVE usar cmesh->BuildMultiphysicsSpace() e não AutoBuild()."
+
+  - nome: "Darcy Misto - Solver"
+    padrao: '\bTPZMixedDarcyFlow\b'
+    requer: '\bELDLt\b|\bELU\b'
+    incompativel_com: '\bECholesky\b'
+    aviso: "Sistemas mistos são de ponto de sela (indefinidos). O solver DEVE usar ELDLt ou ELU, NUNCA ECholesky."
+
+  - nome: "Poisson - Não usar API antiga"
+    padrao: '\bTPZMatPoisson\b'
+    requer: null
+    incompativel_com: '\bTPZDummyFunction\b|\bTPZMatLaplacian\b'
+    aviso: "A API atual do TPZMatPoisson usa std::function diretamente. Não use TPZDummyFunction ou TPZMatLaplacian."
+
+  - nome: "Darcy H1 - Permeabilidade"
+    padrao: '\bTPZDarcyFlow\b'
+    requer: '\bSetConstantPermeability\b'
+    incompativel_com: '\bTPZHybridDarcyFlow\b|\bTPZMixedDarcyFlow\b'
+    aviso: "Você está usando TPZDarcyFlow (formulação H1), mas esqueceu de chamar SetConstantPermeability(). Adicione a chamada a esse método. Mantenha a classe TPZDarcyFlow, não mude o material."

@@ -1,49 +1,24 @@
 import re
+import yaml
+from pathlib import Path
 
-# Regras semânticas de domínio para o NeoPZ
-# Formato: 
-# "nome": Nome descritivo da regra
-# "padrao": Regex que ativa a regra (se for encontrado no código gerado)
-# "requer": Regex que DEVE existir no código se o padrão for encontrado
-# "incompativel_com": Regex que NÃO PODE existir se o padrão for encontrado
-# "aviso": Mensagem que será repassada ao modelo para correção
-REGRAS_SEMANTICAS = [
-    {
-        "nome": "Elasticidade 2D - Construtor Completo",
-        "padrao": r"\bTPZElasticity2D\b",
-        "requer": r"TPZElasticity2D\s*\([^)]*,[^)]*,[^)]*,[^)]*,[^)]*,[^)]*\)", 
-        "incompativel_com": r"\bSetElasticity\b",
-        "aviso": "Para TPZElasticity2D, use sempre o construtor completo com 6 argumentos (id, E, nu, fx, fy, planestress) e NUNCA use SetElasticity(), pois ele não inicializa a lei constitutiva."
-    },
-    {
-        "nome": "Darcy Misto - Malha Multifísica",
-        "padrao": r"\bTPZMixedDarcyFlow\b|\bTPZMultiphysicsCompMesh\b",
-        "requer": r"\bBuildMultiphysicsSpace\b",
-        "incompativel_com": None,
-        "aviso": "Na formulação mista (TPZMixedDarcyFlow / TPZMultiphysicsCompMesh), você DEVE usar cmesh->BuildMultiphysicsSpace() e não AutoBuild()."
-    },
-    {
-        "nome": "Darcy Misto - Solver",
-        "padrao": r"\bTPZMixedDarcyFlow\b",
-        "requer": r"\bELDLt\b|\bELU\b",
-        "incompativel_com": r"\bECholesky\b",
-        "aviso": "Sistemas mistos são de ponto de sela (indefinidos). O solver DEVE usar ELDLt ou ELU, NUNCA ECholesky."
-    },
-    {
-        "nome": "Poisson - Não usar API antiga",
-        "padrao": r"\bTPZMatPoisson\b",
-        "requer": None,
-        "incompativel_com": r"\bTPZDummyFunction\b|\bTPZMatLaplacian\b",
-        "aviso": "A API atual do TPZMatPoisson usa std::function diretamente. Não use TPZDummyFunction ou TPZMatLaplacian."
-    },
-    {
-        "nome": "Darcy H1 - Permeabilidade",
-        "padrao": r"\bTPZDarcyFlow\b",
-        "requer": r"\bSetConstantPermeability\b",
-        "incompativel_com": r"\bTPZHybridDarcyFlow\b|\bTPZMixedDarcyFlow\b",
-        "aviso": "Você está usando TPZDarcyFlow (formulação H1), mas esqueceu de chamar SetConstantPermeability(). Adicione a chamada a esse método. Mantenha a classe TPZDarcyFlow, não mude o material."
-    }
-]
+_RULES_FILE = Path(__file__).parent / "rules" / "semantic.yaml"
+_regras_cache = None
+
+def _carregar_regras() -> list[dict]:
+    global _regras_cache
+    if _regras_cache is not None:
+        return _regras_cache
+    
+    if not _RULES_FILE.exists():
+        _regras_cache = []
+        return _regras_cache
+
+    with open(_RULES_FILE, "r", encoding="utf-8") as f:
+        doc = yaml.safe_load(f) or {}
+        _regras_cache = doc.get("rules", [])
+        
+    return _regras_cache
 
 def validar_semantica(codigo: str) -> list[str]:
     """
@@ -55,7 +30,8 @@ def validar_semantica(codigo: str) -> list[str]:
     if not codigo:
         return erros
         
-    for regra in REGRAS_SEMANTICAS:
+    regras = _carregar_regras()
+    for regra in regras:
         if re.search(regra["padrao"], codigo):
             violado = False
             # Check requer:
