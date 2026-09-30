@@ -7,8 +7,38 @@ from .config import (
     EXAMPLE_POOL_MULT,
     K_WIKI,
     K_WIKI_CONCEITOS,
+    RERANKER_MODEL,
 )
 from .cpp_parser import find_tpz_classes_in_code
+from sentence_transformers import CrossEncoder
+
+_reranker_cache = None
+
+def _get_reranker() -> CrossEncoder:
+    global _reranker_cache
+    if _reranker_cache is None:
+        print(f"  [Reranker] Carregando modelo Cross-Encoder ({RERANKER_MODEL})...")
+        import logging
+        logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+        _reranker_cache = CrossEncoder(RERANKER_MODEL, max_length=512)
+    return _reranker_cache
+
+def _rerank_docs(pergunta: str, docs: list, top_k: int) -> list:
+    if not docs:
+        return []
+    try:
+        reranker = _get_reranker()
+        pairs = [[pergunta, d.page_content] for d in docs]
+        scores = reranker.predict(pairs)
+        for i, doc in enumerate(docs):
+            doc.metadata["rerank_score"] = float(scores[i])
+            
+        scored_docs = list(zip(scores, docs))
+        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        return [doc for score, doc in scored_docs[:top_k]]
+    except Exception as e:
+        print(f"  ⚠️ Erro no reranking: {e}. Usando ordem original.")
+        return docs[:top_k]
 
 _DIRS_LEGADO = ("needrefactor", "PerfTests")
 _DIRS_NAO_API = ("UnitTest_PZ", "Publications", "PerfUtil")
@@ -101,15 +131,16 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
     h_pool = headers_db.max_marginal_relevance_search(
         pergunta, k=pool_headers, fetch_k=pool_headers * 2
     )
-    h_docs = _dedup_docs(
-        garantidos + _boost_por_classe(_despriorizar_legado(h_pool), classes_citadas, "classe")
-    )[:K_HEADERS]
+    h_candidates = _boost_por_classe(_despriorizar_legado(h_pool), classes_citadas, "classe")
+    h_reranked = _rerank_docs(pergunta, h_candidates, K_HEADERS)
+    h_docs = _dedup_docs(garantidos + h_reranked)[:K_HEADERS]
 
     pool_examples = max(K_EXAMPLES * EXAMPLE_POOL_MULT, K_EXAMPLES)
     e_pool = examples_db.max_marginal_relevance_search(
         pergunta, k=pool_examples, fetch_k=pool_examples * 2
     )
-    e_docs = _boost_por_classe(_despriorizar_legado(e_pool), classes_citadas, "classes_usadas")[:K_EXAMPLES]
+    e_candidates = _boost_por_classe(_despriorizar_legado(e_pool), classes_citadas, "classes_usadas")
+    e_docs = _rerank_docs(pergunta, e_candidates, K_EXAMPLES)
 
     w_docs = []
     if wiki_db is not None:
@@ -121,7 +152,8 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
         if explicativa or _pede_snippet_curto(pergunta):
             w_pool = [d for d in w_pool if d.metadata.get("tipo") != "doc_fluxo"]
         w_boosted = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")
-        w_docs = _reservar_vagas_conceitos(w_boosted, K_WIKI, K_WIKI_CONCEITOS)
+        w_reranked = _rerank_docs(pergunta, w_boosted, K_WIKI * 3) # Mais folga para reserva de conceitos
+        w_docs = _reservar_vagas_conceitos(w_reranked, K_WIKI, K_WIKI_CONCEITOS)
 
     all_docs = h_docs + e_docs + w_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}

@@ -52,6 +52,7 @@ OLLAMA_MODEL           = "qwen2.5-coder:7b"
 NUM_CTX                = 16384
 
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
+RERANKER_MODEL         = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 INDEX_DIR              = Path("./banco_chroma_develop")
 WHITELIST_FILE         = INDEX_DIR / "whitelist.txt"
