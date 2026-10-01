@@ -18,6 +18,7 @@ logs/
 
 # Build das soluções de referência (regenerável via CMake)
 reference_solutions/build/
+reference_solutions/build_develop/
 
 # Sistema / editor
 .DS_Store
