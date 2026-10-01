@@ -15,13 +15,15 @@ from pipeline.agent import gerar_codigo_agente
 from pipeline.compilation import _compilar_codigo
 from pipeline.context import PipelineContext
 
-PERGUNTA = (
+PERGUNTA_PADRAO = (
     "Crie uma malha geométrica 2D usando TPZGeoMeshTools e depois uma malha "
     "computacional com TPZCompMesh para resolver um problema de Poisson. "
     "Mostre o código completo com todos os includes necessários."
 )
+PERGUNTA = sys.argv[1] if len(sys.argv) > 1 else PERGUNTA_PADRAO
+SUFIXO = sys.argv[2] if len(sys.argv) > 2 else ""
 
-SAIDA = Path("./logs/compare_agente_rag.json")
+SAIDA = Path(f"./logs/compare_agente_rag{SUFIXO}.json")
 
 
 def _resumo(nome, resultado, dt):
