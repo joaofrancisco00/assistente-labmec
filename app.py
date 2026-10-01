@@ -44,63 +44,63 @@ def _rodape(resultado: dict) -> str:
     linhas = []
 
     if resultado["correcoes_automaticas"]:
-        linhas.append("🔧 **Correções automáticas**: " + ", ".join(resultado["correcoes_automaticas"]))
+        linhas.append("🔧 **Automatic fixes**: " + ", ".join(resultado["correcoes_automaticas"]))
 
     compilacao = resultado.get("compilacao", {"status": "nao_executada", "erros": []})
 
     if not resultado["valido"]:
         if resultado.get("erros_semanticos"):
-            linhas.append("⚠️ **Erros Semânticos**: " + " | ".join(resultado["erros_semanticos"]))
+            linhas.append("⚠️ **Semantic errors**: " + " | ".join(resultado["erros_semanticos"]))
         if resultado.get("erros_aridade"):
-            linhas.append("⚠️ **Erros de Assinatura (Aridade)**: " + " | ".join(resultado["erros_aridade"]))
+            linhas.append("⚠️ **Signature errors (arity)**: " + " | ".join(resultado["erros_aridade"]))
         if resultado["alucinacoes"]:
-            linhas.append("⚠️ **Classes não verificadas**: " + ", ".join(resultado["alucinacoes"]))
+            linhas.append("⚠️ **Unverified classes**: " + ", ".join(resultado["alucinacoes"]))
         if resultado["includes"]:
-            linhas.append("⚠️ **Headers não verificados**: " + ", ".join(resultado["includes"].keys()))
+            linhas.append("⚠️ **Unverified headers**: " + ", ".join(resultado["includes"].keys()))
         if resultado["includes_por_classe"]:
-            linhas.append("⚠️ **Header faltando**: " + ", ".join(
+            linhas.append("⚠️ **Missing header**: " + ", ".join(
                 f"{c} → {h}" for c, h in resultado["includes_por_classe"].items()))
         if resultado["metodos_suspeitos"]:
-            linhas.append("⚠️ **Métodos não encontrados**: " + ", ".join(
+            linhas.append("⚠️ **Methods not found**: " + ", ".join(
                 f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]))
         # Erro de compilador é o único que a checagem de nomes não pega (método
         # de outra classe, assinatura errada) — vale mostrar a mensagem crua,
         # que diz exatamente onde está o problema
         if compilacao["erros"]:
-            linhas.append("❌ **O compilador recusou o código**:\n" + "\n".join(
+            linhas.append("❌ **The compiler rejected the code**:\n" + "\n".join(
                 f"- `{e}`" for e in compilacao["erros"]))
     elif compilacao["status"] == "ok":
-        linhas.append("✅ **Compilado e Verificado** — o g++ aceitou o código, assinaturas conferem e a semântica de modelagem está correta.")
+        linhas.append("✅ **Compiled and verified** — g++ accepted the code, signatures match and no modeling rule was violated.")
     else:
-        linhas.append("✅ **Nomes e Assinaturas verificados** — classes, headers, métodos e aridade existem de fato no NeoPZ.")
+        linhas.append("✅ **Names and signatures verified** — classes, headers, methods and arity really exist in NeoPZ.")
 
     if resultado["classes_legado"]:
-        dicas = [f"{c} → prefira {_ctx.renames[c]}" if c in _ctx.renames else c
+        dicas = [f"{c} → prefer {_ctx.renames[c]}" if c in _ctx.renames else c
                  for c in resultado["classes_legado"]]
-        linhas.append("⚠️ **API antiga usada**: " + ", ".join(dicas))
+        linhas.append("⚠️ **Old API used**: " + ", ".join(dicas))
 
     # A classe existe no NeoPZ, mas o header não está instalado nesta máquina —
     # o código não compila aqui, e isso NÃO é alucinação do modelo. O selo acima
     # já não diz "Compilado" nesse caso (a compilação é pulada), mas o usuário
     # precisa saber por que o código não vai passar no compilador dele.
     if resultado.get("classes_indisponiveis"):
-        linhas.append("⚠️ **Classe fora desta instalação do NeoPZ**: " + ", ".join(
+        linhas.append("⚠️ **Class outside this NeoPZ installation**: " + ", ".join(
             f"{c} ({m})" for c, m in sorted(resultado["classes_indisponiveis"].items())
-        ) + " — a classe existe no NeoPZ, mas o header não está instalado aqui, "
-            "então este código não compila nesta máquina")
+        ) + " — the class exists in NeoPZ, but its header is not installed here, "
+            "so this code does not compile on this machine")
 
     # Código de teste/benchmark não é exemplo de uso da biblioteca: compila,
     # mas o CMake o transforma em executável separado, nunca na libpz. Ele só
     # chega aqui quando a API real não tinha nada melhor a oferecer — dizer
     # isso é mais honesto do que listá-lo no rodapé como fonte qualquer.
     if resultado.get("fontes_nao_api"):
-        linhas.append("ℹ️ **Fontes de teste/benchmark**: " + ", ".join(
+        linhas.append("ℹ️ **Test/benchmark sources**: " + ", ".join(
             f"`{Path(f).name}`" for f in resultado["fontes_nao_api"]
-        ) + " — é código de teste do NeoPZ, não a biblioteca: serve para entender "
-            "a classe, não como exemplo canônico de uso")
+        ) + " — this is NeoPZ test code, not the library: useful to understand "
+            "the class, not as a canonical usage example")
 
     fontes = ", ".join(sorted(Path(f).name for f in resultado["fontes"]))
-    linhas.append(f"📄 **Fontes** ({resultado['tentativas']} tentativa(s)): {fontes}")
+    linhas.append(f"📄 **Sources** ({resultado['tentativas']} attempt(s)): {fontes}")
 
     return "\n\n---\n" + "\n\n".join(linhas)
 
@@ -179,7 +179,7 @@ def responder(mensagem, historico_ui, usar_agente=False):
 
     texto = ""
     status = ""
-    yield "🔎 _Buscando documentação no NeoPZ..._"
+    yield "🔎 _Searching the NeoPZ documentation..._"
     while True:
         item = fila.get()
         if item is None:
@@ -187,8 +187,8 @@ def responder(mensagem, historico_ui, usar_agente=False):
         tipo, conteudo = item
         if tipo == "tentativa":
             texto = ""  # nova tentativa recomeça o texto
-            status = "" if conteudo == "1" else f"🔁 _Tentativa {conteudo} (corrigindo problemas da anterior)..._"
-            yield status or "✍️ _Gerando..._"
+            status = "" if conteudo == "1" else f"🔁 _Attempt {conteudo} (fixing problems from the previous one)..._"
+            yield status or "✍️ _Generating..._"
         elif tipo == "token":
             texto += conteudo
             yield (status + "\n\n" if status else "") + texto
@@ -196,7 +196,7 @@ def responder(mensagem, historico_ui, usar_agente=False):
             status = f"_{conteudo}_"
             yield status + "\n\n" + texto
         elif tipo == "erro":
-            yield f"⚠️ Erro interno: {conteudo}"
+            yield f"⚠️ Internal error: {conteudo}"
             return
 
     if resultado_final:
@@ -214,32 +214,32 @@ _theme = gr.themes.Soft(
 
 demo = gr.ChatInterface(
     responder,
-    title="🤖 Assistente LabMeC — NeoPZ",
+    title="🤖 LabMeC Assistant — NeoPZ",
     chatbot=gr.Chatbot(
         render_markdown=True,
         avatar_images=[None, "🤖"],
         height=600,
     ),
     textbox=gr.Textbox(
-        placeholder="Ex: Como crio uma malha bidimensional com TPZGeoMeshTools?",
+        placeholder="E.g.: How do I create a 2D mesh with TPZGeoMeshTools?",
         container=False,
         scale=7,
     ),
     fill_height=True,
     description=(
-        "Assistente de código para a biblioteca **NeoPZ**, com validação "
-        "rigorosa: classes, headers, métodos, nº de argumentos e regras "
-        "semânticas são conferidos contra o código-fonte real, além de passar "
-        "pelo compilador g++. O rodapé mostra o resultado detalhado da validação."
+        "Code assistant for the **NeoPZ** library, with strict validation: "
+        "classes, headers, methods, number of arguments and semantic rules are "
+        "checked against the real source code, and the code also goes through "
+        "the g++ compiler. The footer shows the detailed validation result."
     ),
     examples=[
-        "Crie uma malha geométrica 2D usando TPZGeoMeshTools e depois uma malha computacional com TPZCompMesh para resolver um problema de Poisson. Mostre o código completo com todos os includes necessários.",
-        "Escreva um código completo em C++ com NeoPZ para resolver um problema de elasticidade linear 2D, com todos os includes necessários.",
-        "Escreva um código completo em C++ com NeoPZ para resolver um problema de Darcy 2D na formulação mista (fluxo e pressão), com todos os includes necessários.",
-        "O que é a classe TPZGeoMesh e para que ela serve?",
+        "Create a 2D geometric mesh using TPZGeoMeshTools and then a computational mesh with TPZCompMesh to solve a Poisson problem. Show the complete code with all the necessary includes.",
+        "Write complete C++ code with NeoPZ to solve a 2D linear elasticity problem, with all the necessary includes.",
+        "Write complete C++ code with NeoPZ to solve a 2D Darcy problem in the mixed formulation (flux and pressure), with all the necessary includes.",
+        "What is the TPZGeoMesh class and what is it for?",
     ],
     additional_inputs=[
-        gr.Checkbox(label="Usar Agente Autônomo (O LLM pesquisa e compila o código sozinho antes de responder)", value=False)
+        gr.Checkbox(label="Use Autonomous Agent (the LLM searches and compiles the code on its own before answering)", value=False)
     ],
 )
 

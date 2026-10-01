@@ -60,7 +60,7 @@ _INDISPONIVEL_CACHE = {}
 
 def _motivo_indisponivel(caminho: str):
     if any(p in _DIRS_NUNCA_INSTALADOS for p in Path(caminho).parts[:-1]):
-        return "não faz parte do build do NeoPZ"
+        return "not part of the NeoPZ build"
 
     prefix = _neopz_prefix()
     if prefix is None:

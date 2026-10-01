@@ -21,7 +21,7 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         llm.bind_tools(tools)
     except Exception:
         return {
-            "resposta": "⚠️ Erro: O modelo atual não suporta Tool Calling (Function Calling). Mude para o Gemini para usar o Agente.",
+            "resposta": "⚠️ Error: the current model does not support Tool Calling (Function Calling). Switch to Gemini to use the Agent.",
             "valido": False, "alucinacoes": [], "erros_aridade": [], "erros_semanticos": [],
             "includes": {}, "includes_por_classe": {}, "metodos_suspeitos": [], 
             "compilacao": {"status": "erros", "erros": []}, "classes_legado": [], 
@@ -30,24 +30,25 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         }
 
     if on_evento:
-        on_evento("status", "🔎 Recuperando contexto do NeoPZ para o agente...")
+        on_evento("status", "🔎 Retrieving NeoPZ context for the agent...")
     h_docs, e_docs, w_docs, fontes = _recuperar_contexto(
         pergunta, ctx.headers_db, ctx.examples_db, ctx.wiki_db)
     contexto = _formatar_contexto(h_docs, e_docs, w_docs)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         "Você é um Engenheiro de Software Sênior especialista em C++ e na biblioteca de Elementos Finitos 'NeoPZ'.\n"
-         "Sua missão é ajudar o usuário gerando código C++ limpo, sem erros e que compile perfeitamente.\n"
-         "REGRAS DE OURO:\n"
-         "1. O código gerado deve ser incluído em blocos Markdown (```cpp ... ```).\n"
-         "2. Você já recebeu abaixo um CONTEXTO RECUPERADO com declarações de classe, exemplos reais e receitas da wiki relevantes para a pergunta. Use-o como base principal — as receitas são código completo já verificado por compilação.\n"
-         "   Só chame ferramentas de busca (`buscar_declaracao_classe`, `buscar_exemplos_codigo`, `buscar_documentacao_wiki`) se faltar algo essencial que o contexto não cobre, ou para entender um erro do compilador.\n"
-         "3. SEMPRE teste o seu código com a ferramenta `testar_compilacao` ANTES de dar a resposta final.\n"
-         "   - Se o compilador retornar erros, você DEVE analisar o erro, usar ferramentas se necessário, e testar novamente com as correções.\n"
-         "   - Você só pode terminar e dar sua resposta definitiva quando tiver 'SUCESSO' no teste de compilação, ou após 4 tentativas falhas.\n"
+         "You are a Senior Software Engineer specialized in C++ and in the 'NeoPZ' Finite Element library.\n"
+         "Your mission is to help the user by generating clean, error-free C++ code that compiles perfectly.\n"
+         "GOLDEN RULES:\n"
+         "1. Generated code must be placed in Markdown blocks (```cpp ... ```).\n"
+         "2. Below you have already received a RETRIEVED CONTEXT with class declarations, real examples and wiki recipes relevant to the question. Use it as your main basis — the recipes are complete code already verified by compilation.\n"
+         "   Only call the search tools (`get_class_declaration`, `search_code_examples`, `search_wiki_docs`) if something essential is missing from the context, or to understand a compiler error.\n"
+         "3. ALWAYS test your code with the `test_compilation` tool BEFORE giving the final answer.\n"
+         "   - If the compiler returns errors, you MUST analyze the error, use tools if needed, and test again with the fixes.\n"
+         "   - You may only finish and give your definitive answer once the compilation test returns 'SUCCESS', or after 4 failed attempts.\n"
+         "4. Always answer in English.\n"
         ),
-        ("system", "CONTEXTO RECUPERADO:\n{contexto}"),
+        ("system", "RETRIEVED CONTEXT:\n{contexto}"),
         ("placeholder", "{chat_history}"),
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
@@ -64,7 +65,7 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
     )
     
     if on_evento:
-        on_evento("status", "🤖 O Agente acordou e está raciocinando (Acompanhe as chamadas de ferramenta no terminal)...")
+        on_evento("status", "🤖 The Agent is reasoning (follow the tool calls in the terminal)...")
     
     resposta_final = ""
     houve_erro = False
@@ -84,10 +85,10 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         resposta_final = res["output"]
     except Exception as e:
         houve_erro = True
-        resposta_final = f"⚠️ Erro interno no raciocínio do agente: {e}"
+        resposta_final = f"⚠️ Internal error in the agent reasoning: {e}"
     
     if on_evento:
-        on_evento("status", "🏁 O Agente concluiu sua execução e encontrou a resposta final.")
+        on_evento("status", "🏁 The Agent finished and produced its final answer.")
     
     compilacao = ({"status": "nao_executada", "erros": [], "ignorados": 0} if houve_erro
                   else _compilar_codigo(resposta_final))

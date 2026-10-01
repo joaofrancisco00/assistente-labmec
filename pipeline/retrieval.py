@@ -44,10 +44,14 @@ _DIRS_LEGADO = ("needrefactor", "PerfTests")
 _DIRS_NAO_API = ("UnitTest_PZ", "Publications", "PerfUtil")
 
 _PERGUNTA_EXPLICATIVA_RE = re.compile(
-    r'\b(o que (é|e|faz|são|sao)|para que serve|explique|explica|como funciona|'
+    r'\b(what(\'s| is| are| does| do)|purpose of|explain|describe|how does|how do .+ work|'
+    r'difference between|'
+    r'o que (é|e|faz|são|sao)|para que serve|explique|explica|como funciona|'
     r'qual (a |é a |e a )?diferen[çc]a)\b', re.IGNORECASE)
 _PEDIDO_DE_CODIGO_RE = re.compile(
-    r'\b(c[óo]digo|programa|escreva|implemente|crie|criar|gere|gerar|resolva|resolver|'
+    r'\b(code|program|write|implement|create|generate|solve|build|'
+    r'(complete|full) example|'
+    r'c[óo]digo|programa|escreva|implemente|crie|criar|gere|gerar|resolva|resolver|'
     r'monte|montar|exemplo completo)\b', re.IGNORECASE)
 
 def _fora_da_api(source: str) -> str:

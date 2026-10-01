@@ -617,9 +617,9 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
             
             if call_args < min_args or call_args > max_args:
                 if min_args == max_args:
-                    msg = f"{cls}::{method} espera exatamente {min_args} argumento(s), mas recebeu {call_args}."
+                    msg = f"{cls}::{method} expects exactly {min_args} argument(s), but got {call_args}."
                 else:
-                    msg = f"{cls}::{method} espera entre {min_args} e {max_args} argumentos, mas recebeu {call_args}."
+                    msg = f"{cls}::{method} expects between {min_args} and {max_args} arguments, but got {call_args}."
                 
                 if msg not in suspeitos_aridade:
                     suspeitos_aridade.append(msg)
@@ -645,9 +645,9 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
             
             if call_args < min_args or call_args > max_args:
                 if min_args == max_args:
-                    msg = f"{cls}::{method} espera exatamente {min_args} argumento(s), mas recebeu {call_args}."
+                    msg = f"{cls}::{method} expects exactly {min_args} argument(s), but got {call_args}."
                 else:
-                    msg = f"{cls}::{method} espera entre {min_args} e {max_args} argumentos, mas recebeu {call_args}."
+                    msg = f"{cls}::{method} expects between {min_args} and {max_args} arguments, but got {call_args}."
                 
                 if msg not in suspeitos_aridade:
                     suspeitos_aridade.append(msg)

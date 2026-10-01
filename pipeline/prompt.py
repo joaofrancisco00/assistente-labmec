@@ -7,28 +7,28 @@ def _formatar_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> str:
     partes = []
 
     if h_docs:
-        partes.append("=== DECLARAÇÕES DE CLASSE (interface real do NeoPZ) ===")
+        partes.append("=== CLASS DECLARATIONS (real NeoPZ interface) ===")
         for doc in h_docs:
             classe = doc.metadata.get("classe", "")
-            label = f"[Classe: {classe}]" if classe else "[Header]"
+            label = f"[Class: {classe}]" if classe else "[Header]"
             partes.append(f"{label}\n{doc.page_content}")
-        partes.append("=== FIM DAS DECLARAÇÕES ===")
+        partes.append("=== END OF DECLARATIONS ===")
 
     if e_docs:
-        partes.append("\n=== EXEMPLOS DE USO ===")
+        partes.append("\n=== USAGE EXAMPLES ===")
         for doc in e_docs:
             fonte = Path(doc.metadata.get("source", "")).name
-            partes.append(f"[Arquivo: {fonte}]\n{doc.page_content}")
-        partes.append("=== FIM DOS EXEMPLOS ===")
+            partes.append(f"[File: {fonte}]\n{doc.page_content}")
+        partes.append("=== END OF EXAMPLES ===")
 
     if w_docs:
-        partes.append("\n=== DOCUMENTAÇÃO VERIFICADA (wiki de análise) ===")
+        partes.append("\n=== VERIFIED DOCUMENTATION (analysis wiki) ===")
         for doc in w_docs:
             titulo = doc.metadata.get("titulo", Path(doc.metadata.get("source", "")).stem)
             tipo   = doc.metadata.get("tipo", "")
             label  = f"[{titulo} | {tipo}]" if tipo else f"[{titulo}]"
             partes.append(f"{label}\n{doc.page_content}")
-        partes.append("=== FIM DA DOCUMENTAÇÃO ===")
+        partes.append("=== END OF DOCUMENTATION ===")
 
     return "\n\n---\n\n".join(partes)
 
@@ -40,10 +40,10 @@ def _formatar_historico(historico: list, max_trocas: int = 3, max_chars_resposta
     for pergunta_ant, resposta_ant in historico[-max_trocas:]:
         resposta_ant = resposta_ant or ""
         if len(resposta_ant) > max_chars_resposta:
-            resposta_ant = resposta_ant[:max_chars_resposta] + "\n[... resposta truncada ...]"
-        partes.append(f"Aluno: {pergunta_ant}\nAssistente: {resposta_ant}")
+            resposta_ant = resposta_ant[:max_chars_resposta] + "\n[... answer truncated ...]"
+        partes.append(f"Student: {pergunta_ant}\nAssistant: {resposta_ant}")
     return (
-        "\n\nHISTÓRICO DA CONVERSA (só contexto — a tarefa atual está no fim):\n"
+        "\n\nCONVERSATION HISTORY (context only — the current task is at the end):\n"
         + "\n---\n".join(partes)
     )
 
@@ -93,14 +93,14 @@ def _montar_prompt(
         for classe, matches in sugestoes.items():
             if classe in renames and renames[classe] in destinos:
                 linhas.append(
-                    f"  - '{classe}' foi RENOMEADA no NeoPZ atual. Use '{renames[classe]}' no lugar."
+                    f"  - '{classe}' was RENAMED in the current NeoPZ. Use '{renames[classe]}' instead."
                 )
             elif matches:
-                linhas.append(f"  - '{classe}' não existe. Você quis dizer: {', '.join(matches)}?")
+                linhas.append(f"  - '{classe}' does not exist. Did you mean: {', '.join(matches)}?")
             else:
-                linhas.append(f"  - '{classe}' não existe e não há classe parecida.")
+                linhas.append(f"  - '{classe}' does not exist and there is no similar class.")
         instrucao_correcao += (
-            "\n\n⚠️ CLASSES INVÁLIDAS:\n"
+            "\n\n⚠️ INVALID CLASSES:\n"
             + "\n".join(linhas)
         )
 
@@ -108,27 +108,27 @@ def _montar_prompt(
         linhas_inc = []
         for inc, sugs in includes_errados.items():
             if sugs:
-                linhas_inc.append(f"  - '#include \"{inc}\"' NÃO existe. Use no lugar: {', '.join(sugs)}")
+                linhas_inc.append(f"  - '#include \"{inc}\"' does NOT exist. Use instead: {', '.join(sugs)}")
             else:
                 linhas_inc.append(
-                    f"  - '#include \"{inc}\"' NÃO existe e NÃO há header parecido. "
-                    f"NÃO existe header único no NeoPZ. Inclua os headers específicos "
-                    f"de cada classe usada (ex: \"pzgmesh.h\" para TPZGeoMesh, "
-                    f"\"pzcmesh.h\" para TPZCompMesh)."
+                    f"  - '#include \"{inc}\"' does NOT exist and there is NO similar header. "
+                    f"There is NO single header in NeoPZ. Include the specific header "
+                    f"of each class used (e.g. \"pzgmesh.h\" for TPZGeoMesh, "
+                    f"\"pzcmesh.h\" for TPZCompMesh)."
                 )
         instrucao_correcao += (
-            "\n\n⚠️ CORRIJA OS HEADERS — OBRIGATÓRIO:\n"
+            "\n\n⚠️ FIX THE HEADERS — MANDATORY:\n"
             + "\n".join(linhas_inc)
-            + "\nNÃO repita o header inválido na próxima resposta."
+            + "\nDO NOT repeat the invalid header in the next answer."
         )
 
     if includes_por_classe:
         linhas_idx = [
-            f"  - Você usou '{classe}' mas não incluiu \"{header}\". Adicione: #include \"{header}\""
+            f"  - You used '{classe}' but did not include \"{header}\". Add: #include \"{header}\""
             for classe, header in includes_por_classe.items()
         ]
         instrucao_correcao += (
-            "\n\n⚠️ HEADERS FALTANDO (segundo índice classe→header, fonte de verdade):\n"
+            "\n\n⚠️ MISSING HEADERS (according to the class→header index, source of truth):\n"
             + "\n".join(linhas_idx)
         )
 
@@ -138,83 +138,84 @@ def _montar_prompt(
             sugestoes = difflib.get_close_matches(metodo, methods_whitelist or set(), n=3, cutoff=0.6)
             if sugestoes:
                 linhas_met.append(
-                    f"  - '{classe}::{metodo}' NÃO existe no NeoPZ. Você quis dizer: {', '.join(sugestoes)}?"
+                    f"  - '{classe}::{metodo}' does NOT exist in NeoPZ. Did you mean: {', '.join(sugestoes)}?"
                 )
             else:
                 linhas_met.append(
-                    f"  - '{classe}::{metodo}' NÃO existe no NeoPZ e não há método parecido. "
-                    f"Use apenas métodos que aparecem nas declarações de classe do contexto."
+                    f"  - '{classe}::{metodo}' does NOT exist in NeoPZ and there is no similar method. "
+                    f"Use only methods that appear in the class declarations of the context."
                 )
         instrucao_correcao += (
-            "\n\n⚠️ MÉTODOS INVENTADOS:\n"
+            "\n\n⚠️ INVENTED METHODS:\n"
             + "\n".join(linhas_met)
-            + "\nNÃO use um método só porque parece lógico — confira nas declarações de classe do contexto."
+            + "\nDO NOT use a method just because it seems logical — check the class declarations in the context."
         )
 
     if erros_aridade:
         instrucao_correcao += (
-            "\n\n⚠️ ERRO DE ARIDADE (NÚMERO DE ARGUMENTOS ERRADO):\n"
+            "\n\n⚠️ ARITY ERROR (WRONG NUMBER OF ARGUMENTS):\n"
             + "\n".join(f"  - {e}" for e in erros_aridade)
-            + "\nVerifique a assinatura correta do método nas declarações de classe fornecidas."
+            + "\nCheck the correct method signature in the provided class declarations."
         )
 
     if erros_compilacao:
         instrucao_correcao += (
-            "\n\n❌ O COMPILADOR (g++) RECUSOU O CÓDIGO ANTERIOR:\n"
+            "\n\n❌ THE COMPILER (g++) REJECTED THE PREVIOUS CODE:\n"
             + "\n".join(f"  - {e}" for e in erros_compilacao)
-            + "\nCada linha acima é uma API que NÃO existe do jeito que você escreveu.\n"
-            "Atenção a 'has no member named X in Y' / 'no member named X': o método X\n"
-            "NÃO pertence à classe Y — mesmo que exista em OUTRA classe do NeoPZ.\n"
-            "Use somente os métodos que aparecem na declaração da própria classe,\n"
-            "no contexto acima. Não troque o método por outro 'parecido' sem conferir."
+            + "\nEach line above is an API that does NOT exist the way you wrote it.\n"
+            "Pay attention to 'has no member named X in Y' / 'no member named X': method X\n"
+            "does NOT belong to class Y — even if it exists in ANOTHER NeoPZ class.\n"
+            "Use only the methods that appear in the declaration of the class itself,\n"
+            "in the context above. Do not swap the method for a 'similar' one without checking."
         )
 
     if erros_semanticos:
         instrucao_correcao += (
-            "\n\n⚠️ ERRO SEMÂNTICO (REGRAS DO NEOPZ VIOLADAS):\n"
+            "\n\n⚠️ SEMANTIC ERROR (NEOPZ RULES VIOLATED):\n"
             + "\n".join(f"  - {e}" for e in erros_semanticos)
-            + "\nO código anterior possui erros de modelagem ou física, que não foram pegos pelo compilador.\n"
-            "Siga rigorosamente as instruções acima na próxima resposta."
+            + "\nThe previous code has modeling or physics errors that the compiler did not catch.\n"
+            "Follow the instructions above strictly in the next answer."
         )
 
     if instrucao_correcao:
-        instrucao_correcao += "\nReescreva o código usando os nomes corretos."
+        instrucao_correcao += "\nRewrite the code using the correct names."
 
     return f"""{system_base}
 
-REGRA FUNDAMENTAL: NUNCA invente nomes de classes TPZ nem de headers.
-Use SOMENTE classes e headers que aparecem no contexto fornecido abaixo.
+FUNDAMENTAL RULE: NEVER invent TPZ class names or header names.
+Use ONLY classes and headers that appear in the context provided below.
 
-REGRA ABSOLUTA SOBRE HEADERS: NUNCA escreva #include "NeoPZ.h" — esse arquivo
-NÃO EXISTE e quebra a compilação. NÃO existe header único que inclui tudo.
-Para CADA classe, inclua o header específico. Exemplos:
+ABSOLUTE RULE ABOUT HEADERS: NEVER write #include "NeoPZ.h" — that file
+DOES NOT EXIST and breaks compilation. There is NO single header that includes everything.
+For EACH class, include its specific header. Examples:
   TPZGeoMesh        → #include "pzgmesh.h"
   TPZCompMesh       → #include "pzcmesh.h"
   TPZLinearAnalysis → #include "TPZLinearAnalysis.h"
 
-Classes TPZ reais relacionadas a esta tarefa (todas existem no NeoPZ):
+Real TPZ classes related to this task (all of them exist in NeoPZ):
 {classes_reais}
 {instrucao_correcao}
 
-INSTRUÇÕES:
-- Use apenas classes cujos headers aparecem no contexto
-- Use apenas métodos visíveis nas declarações de classe acima
-- Prefira SEMPRE a API atual do NeoPZ (ex: TPZMatPoisson, std::function em
-  SetForcingFunction) em vez da API antiga (TPZDummyFunction, TPZMatPoisson3d)
-- Sempre inclua os #include específicos necessários
-- Siga os padrões dos exemplos de uso
-- Se não tiver certeza do nome exato, escreva: // TODO: verificar nome
-- Se o usuário pedir uma EXPLICAÇÃO (ex: "o que é a classe X"), responda com
-  texto didático; código só se for um trecho CURTO usando a própria classe
-  explicada. NUNCA cole um programa completo de outro assunto como "exemplo"
-- Se o usuário pedir código/programa, gere com explicações do que cada parte faz
-- Combine texto explicativo e código quando fizer sentido
-- NUNCA afirme que o código que você gerou foi compilado, testado ou executado
-  com sucesso — você não compilou nada. Se a documentação do contexto disser
-  que um exemplo foi verificado, isso vale para AQUELE exemplo, não para o seu
+INSTRUCTIONS:
+- Use only classes whose headers appear in the context
+- Use only methods visible in the class declarations above
+- ALWAYS prefer the current NeoPZ API (e.g. TPZMatPoisson, std::function in
+  SetForcingFunction) over the old API (TPZDummyFunction, TPZMatPoisson3d)
+- Always include the specific #include lines needed
+- Follow the patterns of the usage examples
+- If you are not sure about an exact name, write: // TODO: check name
+- If the user asks for an EXPLANATION (e.g. "what is class X"), answer with
+  didactic text; code only if it is a SHORT excerpt using the explained class
+  itself. NEVER paste a complete program about another subject as an "example"
+- If the user asks for code/a program, generate it with explanations of what each part does
+- Combine explanatory text and code when it makes sense
+- NEVER claim that the code you generated was compiled, tested or executed
+  successfully — you did not compile anything. If the context documentation says
+  that an example was verified, that applies to THAT example, not to yours
+- Always answer in English
 
 {contexto}{_formatar_historico(historico)}
 
-Tarefa: {pergunta}
+Task: {pergunta}
 
-Resposta:"""
+Answer:"""

@@ -203,7 +203,7 @@ class TestRenomeacoes(unittest.TestCase):
             codigo, whitelist, renames)
         self.assertIn("TPZMatPoisson", corrigido)
         self.assertNotIn("TPZMatLaplacian", corrigido)
-        self.assertEqual(correcoes, ["TPZMatLaplacian → TPZMatPoisson [renomeação]"])
+        self.assertEqual(correcoes, ["TPZMatLaplacian → TPZMatPoisson [rename]"])
 
     def test_destino_fora_da_whitelist_nao_aplica(self):
         # Trava de segurança: entrada desatualizada no renames.json não pode
@@ -406,6 +406,22 @@ class TestPerguntaExplicativa(unittest.TestCase):
                   "resolva um problema de Darcy misto"):
             self.assertFalse(pipeline._pergunta_e_explicativa(p), p)
 
+    def test_explicativas_em_ingles(self):
+        for p in ("What is the TPZGeoMesh class and what is it for?",
+                  "Explain the TPZInt1d class in NeoPZ",
+                  "How does AutoBuild work?",
+                  "What does AutoBuild do?",
+                  "What's the difference between TPZGeoMesh and TPZCompMesh?"):
+            self.assertTrue(pipeline._pergunta_e_explicativa(p), p)
+
+    def test_pedidos_de_codigo_em_ingles(self):
+        for p in ("Create a 2D geometric mesh with TPZGeoMeshTools",
+                  "Write complete code for linear elasticity",
+                  "Explain how to create a Poisson program",   # asks for code
+                  "Solve a mixed Darcy problem"):
+            self.assertFalse(pipeline._pergunta_e_explicativa(p), p)
+
+
 class TestRegrasSemanticas(unittest.TestCase):
     MISTO = ('Here is the code:\n\n```cpp\n'
              '#include "DarcyFlow/TPZMixedDarcyFlow.h"\n'
@@ -445,7 +461,7 @@ class TestHistoricoDeConversa(unittest.TestCase):
         self.assertIn("pergunta 2", texto)
         self.assertIn("pergunta 4", texto)
         # respostas longas são truncadas
-        self.assertIn("[... resposta truncada ...]", texto)
+        self.assertIn("[... answer truncated ...]", texto)
         self.assertNotIn("x" * 200, texto)
 
     def test_historico_entra_no_prompt(self):
@@ -453,10 +469,10 @@ class TestHistoricoDeConversa(unittest.TestCase):
             "e como refino essa malha?", "CONTEXTO", "sistema", set(), set(),
             historico=[("como crio uma malha?", "Use TPZGeoMeshTools.")],
         )
-        self.assertIn("HISTÓRICO DA CONVERSA", prompt)
+        self.assertIn("CONVERSATION HISTORY", prompt)
         self.assertIn("como crio uma malha?", prompt)
         # a tarefa atual continua sendo a pergunta nova
-        self.assertIn("Tarefa: e como refino essa malha?", prompt)
+        self.assertIn("Task: e como refino essa malha?", prompt)
 
 
 class TestDeteccaoDeCodigo(unittest.TestCase):
@@ -554,8 +570,8 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         with patch.object(pipeline, "_compilar_codigo",
                           return_value={"status": "erros", "erros": self.ERRO_GPP, "ignorados": 0}):
             self._gerar(llm)
-        self.assertNotIn("COMPILADOR", llm.prompts[0])       # 1ª tentativa: nada a corrigir
-        self.assertIn("COMPILADOR", llm.prompts[1])
+        self.assertNotIn("COMPILER", llm.prompts[0])       # 1ª tentativa: nada a corrigir
+        self.assertIn("COMPILER", llm.prompts[1])
         self.assertIn("has no member named 'SetElasticity'", llm.prompts[1])
 
     def test_compilacao_ok_vira_selo_mais_forte(self):
@@ -628,7 +644,7 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
         # instalado, que é o Caminho A do README
         with patch.object(pipeline.validation, "_neopz_prefix", return_value=None):
             self.assertEqual(pipeline._motivo_indisponivel(self.BURGER["TPZBurger"]),
-                             "não faz parte do build do NeoPZ")
+                             "not part of the NeoPZ build")
             self.assertIsNone(pipeline._motivo_indisponivel("Mesh/pzgmesh.h"))
 
     def test_sonda_responde_pela_instalacao_desta_maquina(self):
@@ -706,7 +722,7 @@ class TestClasseForaDaInstalacao(unittest.TestCase):
         self.assertTrue(r["valido"])
         self.assertEqual(r["alucinacoes"], [])
         self.assertEqual(r["classes_indisponiveis"],
-                         {"TPZBurger": "não faz parte do build do NeoPZ"})
+                         {"TPZBurger": "not part of the NeoPZ build"})
 
 
 class TestClassesCitadasEmErros(unittest.TestCase):

@@ -330,7 +330,7 @@ def gerar_codigo(
 
             if correcoes_automaticas:
                 print(f"  🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
-                _emitir(on_evento, "status", f"🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
+                _emitir(on_evento, "status", f"🔧 Automatically fixed: {', '.join(correcoes_automaticas)}")
 
         classes_alucinadas = _validar_codigo(resposta, whitelist)
         if tem_codigo:
@@ -359,17 +359,17 @@ def gerar_codigo(
         if nomes_ok and tem_codigo and classes_indisponiveis:
             fora = "; ".join(f"{c} ({m})" for c, m in sorted(classes_indisponiveis.items()))
             compilacao = {"status": "indisponivel", "erros": [], "ignorados": 0,
-                          "motivo": f"código usa classe fora desta instalação: {fora}"}
+                          "motivo": f"code uses a class outside this installation: {fora}"}
             print(f"  ⚠️  Compilação pulada — {compilacao['motivo']}")
-            _emitir(on_evento, "status", f"⚠️ Compilação pulada — {compilacao['motivo']}")
+            _emitir(on_evento, "status", f"⚠️ Compilation skipped — {compilacao['motivo']}")
         elif nomes_ok and tem_codigo:
-            _emitir(on_evento, "status", "🛠️ Compilando o código gerado...")
+            _emitir(on_evento, "status", "🛠️ Compiling the generated code...")
             compilacao = _compilar_codigo(resposta)
             if compilacao["status"] == "erros":
                 erros_compilacao = compilacao["erros"]
                 print(f"  ❌ O compilador recusou o código: {'; '.join(erros_compilacao)}")
                 _emitir(on_evento, "status",
-                        "❌ O compilador recusou o código: " + "; ".join(erros_compilacao))
+                        "❌ The compiler rejected the code: " + "; ".join(erros_compilacao))
             elif compilacao["status"] == "inconclusivo":
                 print(f"  ℹ️  Compilação inconclusiva — {compilacao['ignorados']} diagnóstico(s) "
                       "tratados como artefato do recorte, nenhum acusa API inexistente")
@@ -438,9 +438,9 @@ def gerar_codigo(
             ))
             print(f"  📚 Contexto reforçado com declarações de: {nomes}")
 
-        motivo = ("Compilação reprovada" if erros_compilacao
-                  else "Problemas de validação detectados")
-        _emitir(on_evento, "status", f"↩️ {motivo} — corrigindo e gerando de novo...")
+        motivo = ("Compilation failed" if erros_compilacao
+                  else "Validation problems detected")
+        _emitir(on_evento, "status", f"↩️ {motivo} — fixing and generating again...")
         print("  ↩️  Corrigindo na próxima tentativa...")
 
     if melhor is not None and not nomes_ok:
@@ -466,80 +466,80 @@ def main():
     ctx = PipelineContext.load()
 
     print("\n" + "=" * 50)
-    print("  🤖 Assistente LabMeC Pronto!")
-    print("  Digite 'sair' para encerrar.")
+    print("  🤖 LabMeC Assistant Ready!")
+    print("  Type 'exit' to quit.")
     print("=" * 50 + "\n")
 
     historico = []
 
     while True:
-        pergunta = input("Você: ").strip()
+        pergunta = input("You: ").strip()
 
-        if pergunta.lower() in ("sair", "exit", "quit"):
-            print("Encerrando. Bom trabalho!")
+        if pergunta.lower() in ("exit", "quit", "sair"):
+            print("Exiting. Good work!")
             break
 
         if not pergunta:
             continue
 
-        print("\n[Pensando: buscando documentação e gerando resposta...]")
+        print("\n[Thinking: searching documentation and generating an answer...]")
 
         resultado = gerar_codigo(pergunta, ctx, historico=historico)
 
         historico.append((pergunta, resultado["resposta"]))
         del historico[:-6]
 
-        print("\nAssistente LabMeC:\n")
+        print("\nLabMeC Assistant:\n")
         print(resultado["resposta"])
         print()
 
         if resultado["correcoes_automaticas"]:
-            print(f"🔧 Correções automáticas (classes/métodos/headers): {', '.join(resultado['correcoes_automaticas'])}")
+            print(f"🔧 Automatic fixes (classes/methods/headers): {', '.join(resultado['correcoes_automaticas'])}")
         if resultado["alucinacoes"]:
-            print(f"⚠️  Classes não verificadas: {', '.join(resultado['alucinacoes'])}")
+            print(f"⚠️  Unverified classes: {', '.join(resultado['alucinacoes'])}")
         if resultado["includes"]:
-            print(f"⚠️  Headers não verificados: {', '.join(resultado['includes'].keys())}")
+            print(f"⚠️  Unverified headers: {', '.join(resultado['includes'].keys())}")
         if resultado["includes_por_classe"]:
             faltando_fmt = ", ".join(f"{c} → {h}" for c, h in resultado["includes_por_classe"].items())
-            print(f"⚠️  Header incorreto/faltando para classe (índice determinístico): {faltando_fmt}")
+            print(f"⚠️  Wrong/missing header for class (deterministic index): {faltando_fmt}")
         if resultado["metodos_suspeitos"]:
             metodos_fmt = ", ".join(f"{c}::{m}" for c, m in resultado["metodos_suspeitos"])
-            print(f"⚠️  Métodos não encontrados no NeoPZ (whitelist global): {metodos_fmt}")
+            print(f"⚠️  Methods not found in NeoPZ (global whitelist): {metodos_fmt}")
         if resultado.get("erros_semanticos"):
-            print("⚠️  Erros semânticos (violação de regras do domínio):")
+            print("⚠️  Semantic errors (domain rules violated):")
             for erro in resultado["erros_semanticos"]:
                 print(f"   - {erro}")
         if resultado["compilacao"]["erros"]:
-            print("❌ O compilador recusou o código (erro que a checagem de nomes não pega):")
+            print("❌ The compiler rejected the code (an error the name check does not catch):")
             for e in resultado["compilacao"]["erros"]:
                 print(f"   - {e}")
         if resultado["classes_legado"]:
             dicas = [
-                f"{c} → prefira {ctx.renames[c]}" if c in ctx.renames else c
+                f"{c} → prefer {ctx.renames[c]}" if c in ctx.renames else c
                 for c in resultado["classes_legado"]
             ]
-            print(f"⚠️  API antiga ({'/'.join(_DIRS_LEGADO)}) usada: {', '.join(dicas)}")
-            print("   Essas classes existem, mas são do legado — prefira a API atual do NeoPZ")
+            print(f"⚠️  Old API ({'/'.join(_DIRS_LEGADO)}) used: {', '.join(dicas)}")
+            print("   These classes exist, but they are legacy — prefer the current NeoPZ API")
         if resultado.get("classes_indisponiveis"):
             indisp_fmt = ", ".join(f"{c} ({m})"
                                    for c, m in sorted(resultado["classes_indisponiveis"].items()))
-            print(f"⚠️  Classe existe no NeoPZ mas não está disponível aqui: {indisp_fmt}")
-            print("   O código não vai compilar sem esse header — a compilação foi pulada,")
-            print("   não é alucinação do modelo (ver _classes_indisponiveis)")
+            print(f"⚠️  Class exists in NeoPZ but is not available here: {indisp_fmt}")
+            print("   The code will not compile without that header — compilation was skipped,")
+            print("   this is not a model hallucination (see _classes_indisponiveis)")
         if resultado.get("fontes_nao_api"):
             nomes = ", ".join(Path(f).name for f in resultado["fontes_nao_api"])
-            print(f"ℹ️  Fontes de teste/benchmark consultadas: {nomes}")
-            print(f"   ({'/'.join(_DIRS_NAO_API)} viram executável separado, não entram na libpz —")
-            print("    servem para entender a classe, não como exemplo canônico de uso)")
+            print(f"ℹ️  Test/benchmark sources consulted: {nomes}")
+            print(f"   ({'/'.join(_DIRS_NAO_API)} become separate executables, not part of libpz —")
+            print("    useful to understand the class, not as a canonical usage example)")
         if resultado["valido"] and resultado["compilacao"]["status"] == "ok":
-            print("✅ Compilado: o g++ aceitou o código — classes, métodos e assinaturas existem de verdade")
-            print("   (compilar NÃO verifica o resultado físico — confira se o material/formulação é o adequado ao problema)")
+            print("✅ Compiled: g++ accepted the code — classes, methods and signatures really exist")
+            print("   (compiling does NOT verify the physical result — check that the material/formulation fits the problem)")
         elif resultado["valido"]:
-            print("✅ Nomes verificados: classes, headers e métodos existem no NeoPZ")
-            print("   (semântica e assinaturas NÃO são checadas — confira se o material/método é o adequado ao problema)")
+            print("✅ Names verified: classes, headers and methods exist in NeoPZ")
+            print("   (semantics and signatures are NOT checked — check that the material/method fits the problem)")
 
         fontes_curtas = [Path(f).name for f in resultado["fontes"]]
-        print(f"📄 Fontes ({resultado['tentativas']} tentativa(s)): {', '.join(fontes_curtas)}")
+        print(f"📄 Sources ({resultado['tentativas']} attempt(s)): {', '.join(fontes_curtas)}")
         print("-" * 50 + "\n")
 
         _registrar_interacao(pergunta, resultado)

@@ -48,7 +48,10 @@ def _sem_receita_colada(resposta: str) -> bool:
 # falsa, o pior tipo de erro para um aluno. Selo removido das receitas +
 # instrução no prompt; este check protege as duas correções.
 _ALEGACAO_COMPILACAO_RE = re.compile(
-    r"(compil|execut)[a-zá-úâ-ûã-õç]*(\s+\S+){0,4}\s+com\s+sucesso", re.IGNORECASE)
+    r"(compil|execut)[a-zá-úâ-ûã-õç]*(\s+\S+){0,4}\s+com\s+sucesso"
+    r"|\b(compil|execut|test|ran\b|run)\w*(\s+\S+){0,4}\s+successfully"
+    r"|\bsuccessfully\s+(compiled|executed|tested|ran)\b"
+    r"|\b(has been|have been|was)\s+(compiled|tested|executed)\b", re.IGNORECASE)
 
 
 def _sem_alegacao_de_compilacao(resposta: str) -> bool:
@@ -85,9 +88,9 @@ def _elasticidade_bem_construida(resposta: str) -> bool:
 CASOS = [
     {
         "nome": "poisson_2d_completo",
-        "pergunta": ("Crie uma malha geométrica 2D usando TPZGeoMeshTools e depois uma "
-                     "malha computacional com TPZCompMesh para resolver um problema de "
-                     "Poisson. Mostre o código completo com todos os includes necessários."),
+        "pergunta": ("Create a 2D geometric mesh using TPZGeoMeshTools and then a "
+                     "computational mesh with TPZCompMesh to solve a Poisson "
+                     "problem. Show the complete code with all the necessary includes."),
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "material_correto":    lambda r: "TPZMatPoisson" in r["resposta"],
@@ -102,8 +105,8 @@ CASOS = [
     },
     {
         "nome": "elasticidade_2d",
-        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
-                     "problema de elasticidade linear 2D, com todos os includes necessários."),
+        "pergunta": ("Write complete C++ code with NeoPZ to solve a "
+                     "2D linear elasticity problem, with all the necessary includes."),
         "checks": {
             "validacao_limpa":    lambda r: r["valido"],
             "material_2d":        lambda r: "TPZElasticity2D" in r["resposta"],
@@ -115,9 +118,9 @@ CASOS = [
     },
     {
         "nome": "darcy_misto_2d",
-        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
-                     "problema de Darcy 2D na formulação mista (fluxo e pressão), com "
-                     "todos os includes necessários."),
+        "pergunta": ("Write complete C++ code with NeoPZ to solve a "
+                     "2D Darcy problem in the mixed formulation (flux and pressure), with "
+                     "all the necessary includes."),
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "material_misto":      lambda r: "TPZMixedDarcyFlow" in r["resposta"],
@@ -134,9 +137,9 @@ CASOS = [
         # (espaços combinados) porque o catálogo — único doc que aponta
         # TPZDarcyFlow — era espremido do retrieval pelas receitas.
         "nome": "darcy_h1_2d",
-        "pergunta": ("Escreva um código completo em C++ com NeoPZ para resolver um "
-                     "problema de fluxo de Darcy 2D usando o espaço de aproximação H1, "
-                     "com todos os includes necessários."),
+        "pergunta": ("Write complete C++ code with NeoPZ to solve a "
+                     "2D Darcy flow problem using the H1 approximation space, "
+                     "with all the necessary includes."),
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "material_h1":         lambda r: "TPZDarcyFlow" in r["resposta"],
@@ -151,7 +154,7 @@ CASOS = [
     },
     {
         "nome": "prosa_tpzgeomesh",
-        "pergunta": "O que é a classe TPZGeoMesh e para que ela serve?",
+        "pergunta": "What is the TPZGeoMesh class and what is it for?",
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "menciona_a_classe":   lambda r: "TPZGeoMesh" in r["resposta"],
@@ -161,7 +164,7 @@ CASOS = [
     },
     {
         "nome": "explicar_tpzint1d",
-        "pergunta": "Explique a classe TPZInt1d do NeoPZ: o que ela faz e quais são seus principais métodos?",
+        "pergunta": "Explain the NeoPZ TPZInt1d class: what does it do and what are its main methods?",
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "menciona_a_classe":   lambda r: "TPZInt1d" in r["resposta"],

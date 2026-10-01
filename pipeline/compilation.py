@@ -112,14 +112,14 @@ def _compilar_codigo(resposta: str, timeout: int = TIMEOUT_COMPILACAO) -> dict:
     prefix = _neopz_prefix()
     compilador = _compilador_disponivel()
     if prefix is None or compilador is None:
-        motivo = ("instalação do NeoPZ não encontrada" if prefix is None
-                  else "compilador C++ não encontrado")
+        motivo = ("NeoPZ installation not found" if prefix is None
+                  else "C++ compiler not found")
         return {"status": "indisponivel", "erros": [], "ignorados": 0, "motivo": motivo}
 
     flags_include = _include_flags(prefix)
     if not flags_include:
         return {"status": "indisponivel", "erros": [], "ignorados": 0,
-                "motivo": "include path da instalação não pôde ser lido"}
+                "motivo": "the installation include path could not be read"}
 
     tu = _montar_tu(codigo)
     with tempfile.TemporaryDirectory() as tmp:

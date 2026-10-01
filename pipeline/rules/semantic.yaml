@@ -1,30 +1,30 @@
 rules:
-  - nome: "Elasticidade 2D - Construtor Completo"
+  - nome: "2D Elasticity - Full Constructor"
     padrao: '\bTPZElasticity2D\b'
     requer: 'TPZElasticity2D\s*\([^)]*,[^)]*,[^)]*,[^)]*,[^)]*,[^)]*\)'
     incompativel_com: '\bSetElasticity\b'
-    aviso: "Para TPZElasticity2D, use sempre o construtor completo com 6 argumentos (id, E, nu, fx, fy, planestress) e NUNCA use SetElasticity(), pois ele não inicializa a lei constitutiva."
+    aviso: "For TPZElasticity2D, always use the full constructor with 6 arguments (id, E, nu, fx, fy, planestress) and NEVER use SetElasticity(), because it does not initialize the constitutive law."
 
-  - nome: "Darcy Misto - Malha Multifísica"
+  - nome: "Mixed Darcy - Multiphysics Mesh"
     padrao: '\bTPZMixedDarcyFlow\b|\bTPZMultiphysicsCompMesh\b'
     requer: '\bBuildMultiphysicsSpace\b'
     incompativel_com: null
-    aviso: "Na formulação mista (TPZMixedDarcyFlow / TPZMultiphysicsCompMesh), você DEVE usar cmesh->BuildMultiphysicsSpace() e não AutoBuild()."
+    aviso: "In the mixed formulation (TPZMixedDarcyFlow / TPZMultiphysicsCompMesh), you MUST use cmesh->BuildMultiphysicsSpace() and not AutoBuild()."
 
-  - nome: "Darcy Misto - Solver"
+  - nome: "Mixed Darcy - Solver"
     padrao: '\bTPZMixedDarcyFlow\b'
     requer: '\bELDLt\b|\bELU\b'
     incompativel_com: '\bECholesky\b'
-    aviso: "Sistemas mistos são de ponto de sela (indefinidos). O solver DEVE usar ELDLt ou ELU, NUNCA ECholesky."
+    aviso: "Mixed systems are saddle-point (indefinite) problems. The solver MUST use ELDLt or ELU, NEVER ECholesky."
 
-  - nome: "Poisson - Não usar API antiga"
+  - nome: "Poisson - Do not use the old API"
     padrao: '\bTPZMatPoisson\b'
     requer: null
     incompativel_com: '\bTPZDummyFunction\b|\bTPZMatLaplacian\b'
-    aviso: "A API atual do TPZMatPoisson usa std::function diretamente. Não use TPZDummyFunction ou TPZMatLaplacian."
+    aviso: "The current TPZMatPoisson API uses std::function directly. Do not use TPZDummyFunction or TPZMatLaplacian."
 
-  - nome: "Darcy H1 - Permeabilidade"
+  - nome: "H1 Darcy - Permeability"
     padrao: '\bTPZDarcyFlow\b'
     requer: '\bSetConstantPermeability\b'
     incompativel_com: '\bTPZHybridDarcyFlow\b|\bTPZMixedDarcyFlow\b'
-    aviso: "Você está usando TPZDarcyFlow (formulação H1), mas esqueceu de chamar SetConstantPermeability(). Adicione a chamada a esse método. Mantenha a classe TPZDarcyFlow, não mude o material."
+    aviso: "You are using TPZDarcyFlow (H1 formulation), but forgot to call SetConstantPermeability(). Add a call to that method. Keep the TPZDarcyFlow class, do not change the material."

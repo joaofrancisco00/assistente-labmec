@@ -42,7 +42,7 @@ def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict
     for errada in alucinadas:
         if errada in renames and renames[errada] in destinos:
             certa = renames[errada]
-            sufixo = " [renomeação]"
+            sufixo = " [rename]"
         else:
             candidatos = difflib.get_close_matches(errada, destinos, n=1, cutoff=CUTOFF_CLASSE_AUTOMATICA)
             if not candidatos:
