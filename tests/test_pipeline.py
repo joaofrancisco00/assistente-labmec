@@ -406,6 +406,30 @@ class TestPerguntaExplicativa(unittest.TestCase):
                   "resolva um problema de Darcy misto"):
             self.assertFalse(pipeline._pergunta_e_explicativa(p), p)
 
+class TestRegrasSemanticas(unittest.TestCase):
+    MISTO = ('Here is the code:\n\n```cpp\n'
+             '#include "DarcyFlow/TPZMixedDarcyFlow.h"\n'
+             'auto *mat = new TPZMixedDarcyFlow(1, 2);\n'
+             'cmesh->BuildMultiphysicsSpace(active, meshes);\n'
+             '{solver}\n```\n')
+
+    def test_solver_errado_no_misto_e_pego(self):
+        r = pipeline.validar_semantica(self.MISTO.format(solver="solver.SetDirect(ECholesky);"))
+        self.assertTrue(any("ELDLt" in e for e in r), r)
+
+    def test_comentario_que_cita_o_solver_errado_nao_dispara(self):
+        # Regressão real: a receita do Darcy misto tem o comentário
+        # "saddle point: ELDLt, NEVER ECholesky"; o modelo o copiava junto e a
+        # regra reprovava as 3 tentativas de um código correto
+        codigo = self.MISTO.format(
+            solver="// saddle point: ELDLt, NEVER ECholesky\nsolver.SetDirect(ELDLt);")
+        self.assertEqual(pipeline.validar_semantica(codigo), [])
+
+    def test_prosa_que_cita_o_solver_errado_nao_dispara(self):
+        codigo = (self.MISTO.format(solver="solver.SetDirect(ELDLt);")
+                  + "\nNote: ECholesky would fail here, because the system is indefinite.")
+        self.assertEqual(pipeline.validar_semantica(codigo), [])
+
 
 class TestHistoricoDeConversa(unittest.TestCase):
     def test_vazio_nao_adiciona_nada(self):

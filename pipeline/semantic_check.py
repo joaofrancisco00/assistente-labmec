@@ -2,6 +2,10 @@ import re
 import yaml
 from pathlib import Path
 
+from .compilation import _extrair_blocos_codigo
+
+_COMENTARIO_RE = re.compile(r'//[^\n]*|/\*.*?\*/', re.DOTALL)
+
 _RULES_FILE = Path(__file__).parent / "rules" / "semantic.yaml"
 _regras_cache = None
 
@@ -29,6 +33,7 @@ def validar_semantica(codigo: str) -> list[str]:
     erros = []
     if not codigo:
         return erros
+    codigo = _COMENTARIO_RE.sub("", _extrair_blocos_codigo(codigo) or codigo)
         
     regras = _carregar_regras()
     for regra in regras:
