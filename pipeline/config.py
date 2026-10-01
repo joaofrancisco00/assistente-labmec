@@ -67,6 +67,7 @@ COLLISIONS_FILE          = HEADER_INDEX_DIR / "collisions.json"
 LEGACY_CLASSES_FILE     = INDEX_DIR / "legacy_classes.txt"
 
 LOG_INTERACOES_FILE     = Path("./logs/interacoes.jsonl")
+LLM_CACHE_FILE          = Path("./.cache/llm_cache.sqlite")
 
 RENAMES_FILE            = Path("./renames.json")
 TEMPERATURE            = 0.1

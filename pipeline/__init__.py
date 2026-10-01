@@ -119,6 +119,7 @@ from . import (
     compilation,
     prompt,
     cpp_parser,
+    llm_cache,
 )
 
 from .cpp_parser import (
@@ -274,7 +275,13 @@ def gerar_codigo(
             print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
         _MAX_RETRIES_API = 2
+        resposta = llm_cache.buscar(llm, prompt)
+        if resposta is not None:
+            print("  💾 Resposta do LLM veio do cache")
+            _emitir(on_evento, "token", resposta)
         for _api_try in range(1, _MAX_RETRIES_API + 1):
+            if resposta is not None:
+                break
             try:
                 pedacos = []
                 for pedaco in llm.stream(prompt):
@@ -301,6 +308,7 @@ def gerar_codigo(
                         llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
                     continue
                 raise
+        llm_cache.salvar(llm, prompt, resposta)
 
         tem_codigo = _resposta_contem_codigo(resposta)
         correcoes_automaticas = []
@@ -442,6 +450,7 @@ def gerar_codigo(
 
 
 def obter_llm():
+    llm_cache.ativar_se_configurado()
     if "GOOGLE_API_KEY" in os.environ and ChatGoogleGenerativeAI is not None:
         print(f"  ☁️  Usando Gemini ({GEMINI_MODEL}) via API...")
         return ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=TEMPERATURE, max_retries=0)

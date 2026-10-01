@@ -137,6 +137,20 @@ uv run eval_benchmark.py    # benchmark de código (~10 min)
 
 Acusa regressão silenciosa se a nota cair.
 
+Se você mexeu só em código determinístico (corretores, validação, regras
+semânticas, selo do rodapé), rode com o **cache do LLM** para não gastar a
+cota do Gemini nem esperar o modelo local:
+
+```bash
+LLM_CACHE=1 uv run eval_benchmark.py
+```
+
+As respostas ficam em `.cache/llm_cache.sqlite`, indexadas pelo prompt exato e
+pelo modelo: mudou prompt, índice, receitas ou modelo, a chamada vai ao LLM de
+verdade. Para começar do zero, apague esse arquivo. O cache é **só para
+desenvolvimento**: não ligue no `app.py`, ou os alunos receberiam sempre a
+mesma resposta (inclusive uma ruim) para a mesma pergunta.
+
 ## Compilando as receitas (verificação)
 
 ```bash
