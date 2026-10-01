@@ -58,7 +58,7 @@ def _prioridade(path: Path) -> str:
     """Define a prioridade do documento para o RAG de código."""
     if "flows" in path.parts:
         return "alta"  # Receitas com código compilável = Ouro
-    if path.name == "catalogo-materiais-api-atual.md":
+    if path.name == "material-catalog-current-api.md":
         return "alta"  # Mapa de seleção de classes = Crítico
     return "media"  # Conceitos teóricos e descrições = Apoio
 

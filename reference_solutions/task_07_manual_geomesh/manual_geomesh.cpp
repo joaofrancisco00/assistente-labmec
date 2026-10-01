@@ -1,16 +1,16 @@
-// manual_geomesh.cpp — Solução de referência: construção MANUAL de uma malha
-// geométrica com elementos triangulares e quadrilaterais.
+// manual_geomesh.cpp — Reference solution: MANUAL construction of a geometric
+// mesh with triangular and quadrilateral elements.
 //
-// Ensina o padrão canônico do NeoPZ para criar nós e elementos sem usar os
+// Teaches the canonical NeoPZ pattern to create nodes and elements without the
 // helpers (TPZGeoMeshTools::CreateGeoMeshOnGrid, TPZGmshReader, etc.).
-// Use este padrão quando precisar de controle total sobre a topologia da malha.
+// Use this pattern when you need full control over the mesh topology.
 //
-// Fluxo:
+// Flow:
 //   1. new TPZGeoMesh()  →  SetDimension
 //   2. NodeVec().AllocateNewElement()  →  [i].Initialize(coords, *gmesh)
-//   3. CreateGeoElement(tipo, nodeindices, matid, index)
+//   3. CreateGeoElement(type, nodeindices, matid, index)
 //   4. BuildConnectivity()
-//   5. TPZGeoElBC para criar elementos de contorno
+//   5. TPZGeoElBC to create boundary elements
 
 #include "pzgmesh.h"        // TPZGeoMesh
 #include "pzgnode.h"        // TPZGeoNode
@@ -21,83 +21,78 @@
 #include <iostream>
 
 int main() {
-    // ── 1. Criar a malha geométrica e definir a dimensão ──────────────────
+    // ── 1. Create the geometric mesh and set the dimension ────────────────
     TPZGeoMesh *gmesh = new TPZGeoMesh();
     gmesh->SetDimension(2);
 
-    // ── 2. Alocar e inicializar os nós ────────────────────────────────────
-    // Padrão canônico: AllocateNewElement() reserva espaço no ChunkVector e
-    // retorna o índice; Initialize() preenche as coordenadas e registra o nó.
+    // ── 2. Allocate and initialize the nodes ─────────────────────────────
+    // Canonical pattern: AllocateNewElement() reserves space in the ChunkVector
+    // and returns the index; Initialize() fills in the coordinates and
+    // registers the node.
+    // DO NOT call NodeVec().Resize(nNodes) before: AllocateNewElement() grows
+    // the vector by itself, so Resize + AllocateNewElement creates 2*nNodes nodes
+    // and the elements end up pointing to the uninitialized ones.
     //
-    //  5─────6─────7
-    //  │  Q  │  T  │   (Q = quadrilátero matId 1, T = triângulo matId 2)
-    //  │     │  /  │
-    //  0─────1─────2
-    //        │  /
-    //        3─4    ← nós extras do triângulo inferior (não usados no exemplo
-    //                 acima, mantidos para ilustrar padrão multi-elemento)
-    //
-    // Malha simples: 4 nós, 1 quadrilátero + 1 triângulo compartilhando aresta.
+    // Simple mesh: 4 nodes, 1 quadrilateral + 1 triangle sharing an edge.
     //
     //  3───2
     //  │ \ │
     //  0───1
     //
-    //  Elemento 1 (EQuadrilateral): nós 0-1-2-3
-    //  Elemento 2 (ETriangle):      nós 1-2-3   ← triângulo no canto superior
+    //  Element 1 (EQuadrilateral): nodes 0-1-2-3
+    //  Element 2 (ETriangle):      nodes 1-2-3   ← triangle in the upper corner
 
     const int nNodes = 4;
     const TPZManVector<TPZManVector<REAL, 3>, 4> coords = {
-        {0., 0., 0.},  // nó 0
-        {1., 0., 0.},  // nó 1
-        {1., 1., 0.},  // nó 2
-        {0., 1., 0.},  // nó 3
+        {0., 0., 0.},  // node 0
+        {1., 0., 0.},  // node 1
+        {1., 1., 0.},  // node 2
+        {0., 1., 0.},  // node 3
     };
 
-    gmesh->NodeVec().Resize(nNodes);
     for (int i = 0; i < nNodes; i++) {
         auto newindex = gmesh->NodeVec().AllocateNewElement();
         gmesh->NodeVec()[newindex].Initialize(coords[i], *gmesh);
     }
 
-    // ── 3. Criar os elementos geométricos ────────────────────────────────
+    // ── 3. Create the geometric elements ─────────────────────────────────
     constexpr int matIdDom{1};
     constexpr int matIdBC{-1};
     int64_t index{-1};
 
-    // Quadrilátero: 4 nós em sentido anti-horário
+    // Quadrilateral: 4 nodes in counter-clockwise order
     TPZManVector<int64_t, 4> quadNodes = {0, 1, 2, 3};
     gmesh->CreateGeoElement(EQuadrilateral, quadNodes, matIdDom, index);
 
-    // Triângulo: 3 nós em sentido anti-horário
-    // (compartilha a aresta 1-2 com o quadrilátero acima)
+    // Triangle: 3 nodes in counter-clockwise order
+    // (shares edge 1-2 with the quadrilateral above)
     TPZManVector<int64_t, 3> triNodes = {1, 2, 3};
     gmesh->CreateGeoElement(ETriangle, triNodes, matIdDom, index);
 
-    // ── 4. Construir a conectividade ──────────────────────────────────────
-    // OBRIGATÓRIO após inserir todos os elementos — sem isso os vizinhos ficam
-    // nulos e a integração numérica não funciona.
+    // ── 4. Build the connectivity ────────────────────────────────────────
+    // MANDATORY after inserting all elements — without it the neighbors are
+    // null and the numerical integration does not work.
     gmesh->BuildConnectivity();
 
-    // ── 5. Criar elementos de contorno via TPZGeoElBC ─────────────────────
-    // TPZGeoElBC cria um elemento 1D de contorno num lado (side) de um elemento
-    // existente. Os "sides" 1D de um quadrilátero (4 nós) são 4, 5, 6 e 7.
-    // Os "sides" 1D de um triângulo (3 nós) são 3, 4 e 5.
+    // ── 5. Create boundary elements via TPZGeoElBC ───────────────────────
+    // TPZGeoElBC creates a 1D boundary element on a side of an existing
+    // element. The 1D sides of a quadrilateral (4 nodes) are 4, 5, 6 and 7.
+    // The 1D sides of a triangle (3 nodes) are 3, 4 and 5.
     {
         TPZGeoEl *quad = gmesh->Element(0);
-        // Lados 1D do quadrilátero: 4=aresta 0-1, 5=1-2, 6=2-3, 7=3-0
-        TPZGeoElBC(quad, 4, matIdBC);  // contorno inferior
-        TPZGeoElBC(quad, 7, matIdBC);  // contorno esquerdo
+        // 1D sides of the quadrilateral: 4=edge 0-1, 5=1-2, 6=2-3, 7=3-0
+        TPZGeoElBC(quad, 4, matIdBC);  // bottom boundary
+        TPZGeoElBC(quad, 7, matIdBC);  // left boundary
     }
     {
         TPZGeoEl *tri = gmesh->Element(1);
-        // Lados 1D do triângulo: 3=aresta 1-2, 4=2-3, 5=3-1
-        TPZGeoElBC(tri, 5, matIdBC);   // contorno diagonal
+        // 1D sides of the triangle: 3=edge 1-2, 4=2-3, 5=3-1
+        TPZGeoElBC(tri, 5, matIdBC);   // diagonal boundary
     }
 
-    // ── 6. Verificação simples ────────────────────────────────────────────
-    std::cout << "Nós:      " << gmesh->NNodes()    << std::endl;
-    std::cout << "Elementos:" << gmesh->NElements() << std::endl;
+    // ── 6. Simple check ──────────────────────────────────────────────────
+    std::cout << "Nodes:    " << gmesh->NNodes()    << std::endl;
+    std::cout << "Elements: " << gmesh->NElements() << std::endl;
 
     delete gmesh;
     return 0;

@@ -1,42 +1,55 @@
-# Solvers de Sistemas Lineares: TPZStepSolver
+# Linear System Solvers: TPZStepSolver
 
-Esta página serve como catálogo da estrutura do solver de passos do NeoPZ, para a qual **não deve** ser gerado código "inventado" com métodos não suportados.
+This page is a catalog of the structure of the NeoPZ step solver, for which **no** "invented" code with unsupported methods should be generated.
 
 ## `TPZStepSolver`
 **Header**: `#include "pzstepsolver.h"`
 
-Representa um solver de matriz e também pode ser utilizado como pré-condicionador. O `TPZStepSolver` atua resolvendo sistemas lineares do tipo `A*x = B`. No NeoPZ, ele geralmente é instanciado, configurado e depois entregue à classe de análise computacional (`TPZAnalysis` ou `TPZLinearAnalysis`).
+Represents a matrix solver and can also be used as a preconditioner. `TPZStepSolver` solves linear systems of the form `A*x = B`. In NeoPZ it is usually instantiated, configured and then handed to the analysis class (`TPZAnalysis` or `TPZLinearAnalysis`) with `SetSolver`.
 
-### Exemplo de Uso (Iterativo com Pré-condicionador)
+### Real configuration methods (from `pzstepsolver.h`)
+
+| Method | Use |
+|---|---|
+| `SetDirect(DecomposeType)` | **Direct** solver only: `ECholesky` (SPD), `ELDLt` (symmetric indefinite, e.g. saddle point), `ELU` (general) |
+| `SetCG(numiterations, pre, tol, FromCurrent)` | Conjugate Gradient with preconditioner `pre` |
+| `SetGMRES(numiterations, numvectors, pre, tol, FromCurrent)` | GMRES with `numvectors` Krylov vectors and preconditioner `pre` |
+| `SetBiCGStab(numiterations, pre, tol, FromCurrent)` | BiCGStab with preconditioner `pre` |
+| `SetJacobi(numiterations, tol, FromCurrent)` | Jacobi (also used as a preconditioner) |
+| `SetSOR(...)` / `SetSSOR(...)` | (Symmetric) successive over-relaxation |
+| `SetTolerance(tol)` | Changes the tolerance |
+| `SetPreconditioner(solver)` | Sets a preconditioner solver |
+
+**`SetDirect` does NOT select iterative methods**: `SetDirect(EGMRES)` or
+`SetDirect(EJacobi)` do not exist. Iterative methods have their own setters,
+which receive the preconditioner as an argument.
+
+### Usage example (direct and iterative with preconditioner)
 ```cpp
 #include "pzstepsolver.h"
 #include "TPZLinearAnalysis.h"
 
 int main() {
-    // Supomos que a análise já possua a matriz global montada
+    // Assume the analysis already has its computational mesh and structural matrix
     TPZLinearAnalysis an;
-    
-    // 1. Criando o Solver Principal (Ex: Método iterativo GMRES)
-    TPZStepSolver<STATE> step;
-    
-    // Configurando o tipo de solver com SetDirect (apesar do nome, define o método)
-    // Opções comuns: EGMRES, ECG (Gradiente Conjugado), EDirect
-    step.SetDirect(EGMRES); 
-    
-    // Configurações do solver iterativo
-    step.SetTolerance(1.e-8);
-    // Para acesso ao número máximo de iterações, usa-se a variável fMaxIterations ou métodos específicos dependendo da versão
-    
-    // 2. Criando o Pré-condicionador (Ex: Jacobi)
+
+    // Option 1: direct solver (SPD system → Cholesky)
+    TPZStepSolver<STATE> direct;
+    direct.SetDirect(ECholesky);
+
+    // Option 2: GMRES preconditioned with Jacobi
     TPZStepSolver<STATE> jacobi;
-    jacobi.SetDirect(EJacobi);
-    
-    // 3. Conectando o pré-condicionador ao solver principal
-    step.SetPreconditioner(jacobi); // Nota: Em versões do NeoPZ, o método correto é SetPrecond() ou SetPreconditioner()
-    
-    // 4. Entregando o solver completo para a classe de análise
-    an.SetSolver(step);
-    
+    jacobi.SetJacobi(1, 0., 0);           // 1 iteration, as a preconditioner
+
+    TPZStepSolver<STATE> gmres;
+    const int64_t maxIterations = 500;
+    const int krylovVectors = 50;
+    const REAL tol = 1.e-8;
+    gmres.SetGMRES(maxIterations, krylovVectors, jacobi, tol, 0);
+
+    // Hand the chosen solver to the analysis
+    an.SetSolver(gmres);
+
     return 0;
 }
 ```

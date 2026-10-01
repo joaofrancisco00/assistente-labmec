@@ -1,20 +1,20 @@
-// darcy_h1.cpp — Solução de referência: fluxo de Darcy 2D na formulação
-// PRIMAL (espaço H1, pressão como única incógnita).
+// darcy_h1.cpp — Reference solution: 2D Darcy flow in the PRIMAL
+// formulation (H1 space, pressure as the only unknown).
 //
-//   -∇·(K ∇p) = f  em [0,1]×[0,1],  p = 0 no contorno
+//   -∇·(K ∇p) = f  in [0,1]×[0,1],  p = 0 on the boundary
 //
-// Estruturalmente idêntico ao Poisson 2D (mesmo esqueleto H1, malha única) —
-// o que muda é o material e a permeabilidade. NÃO confundir com:
-//   TPZMixedDarcyFlow  → formulação mista (H(div)+L2, 3 malhas, multifísica)
-//   TPZHybridDarcyFlow → formulação hibridizada (espaços COMBINADOS); herda
-//                        de TPZDarcyFlow, mas não é o material de uma malha
-//                        H1 simples.
+// Structurally identical to 2D Poisson (same H1 skeleton, single mesh) —
+// what changes is the material and the permeability. DO NOT confuse with:
+//   TPZMixedDarcyFlow  → mixed formulation (H(div)+L2, 3 meshes, multiphysics)
+//   TPZHybridDarcyFlow → hybridized formulation (COMBINED spaces); it inherits
+//                        from TPZDarcyFlow, but it is not the material of a
+//                        simple H1 mesh.
 
 #include "pzgmesh.h"                // TPZGeoMesh
 #include "TPZGeoMeshTools.h"        // TPZGeoMeshTools::CreateGeoMeshOnGrid
 #include "MMeshType.h"              // MMeshType::ETriangular
 #include "pzcmesh.h"                // TPZCompMesh
-#include "DarcyFlow/TPZDarcyFlow.h" // TPZDarcyFlow (H1 — prefixo da família!)
+#include "DarcyFlow/TPZDarcyFlow.h" // TPZDarcyFlow (H1 — family prefix!)
 #include "TPZLinearAnalysis.h"      // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"        // TPZSkylineStructMatrix
 #include "pzstepsolver.h"           // TPZStepSolver
@@ -23,35 +23,35 @@
 #include "pzvec.h"                  // TPZVec
 
 int main() {
-    // ── 1. Malha geométrica ──────────────────────────────────────────────
+    // ── 1. Geometric mesh ────────────────────────────────────────────────
     constexpr int dim{2};
     const TPZManVector<REAL, 3> minX = {0., 0., 0.};
     const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
     const TPZManVector<int, 2> nDivs = {8, 8};
-    constexpr int matIdDominio{1};
-    constexpr int matIdContorno{-1};
-    // dim*2 + 1 ids com createBoundEls=true (1 domínio + 4 contornos em 2D)
-    const TPZManVector<int, 5> matIds = {matIdDominio, matIdContorno,
-                                         matIdContorno, matIdContorno,
-                                         matIdContorno};
+    constexpr int matIdDomain{1};
+    constexpr int matIdBoundary{-1};
+    // dim*2 + 1 ids with createBoundEls=true (1 domain + 4 boundaries in 2D)
+    const TPZManVector<int, 5> matIds = {matIdDomain, matIdBoundary,
+                                         matIdBoundary, matIdBoundary,
+                                         matIdBoundary};
 
     TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
         dim, minX, maxX, matIds, nDivs, MMeshType::ETriangular,
         /*createBoundEls=*/true);
 
-    // ── 2. Malha computacional — UMA malha, espaço H1 ────────────────────
+    // ── 2. Computational mesh — ONE mesh, H1 space ───────────────────────
     constexpr int pOrder{2};
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
-    cmesh->SetAllCreateFunctionsContinuous();  // H1 contínuo (pressão)
+    cmesh->SetAllCreateFunctionsContinuous();  // continuous H1 (pressure)
 
-    // ── 3. Material (no heap — a malha assume a posse) ───────────────────
-    auto *mat = new TPZDarcyFlow(matIdDominio, dim);
-    // Permeabilidade K (de TPZIsotropicPermeability). Para K variável no
-    // espaço existe SetPermeabilityFunction.
+    // ── 3. Material (on the heap — the mesh takes ownership) ─────────────
+    auto *mat = new TPZDarcyFlow(matIdDomain, dim);
+    // Permeability K (from TPZIsotropicPermeability). For a spatially
+    // varying K there is SetPermeabilityFunction.
     mat->SetConstantPermeability(1.);
-    // Termo fonte f
+    // Source term f
     mat->SetForcingFunction(
         [](const TPZVec<REAL> &loc, TPZVec<STATE> &result) {
             result[0] = 1.;
@@ -59,23 +59,23 @@ int main() {
         pOrder);
     cmesh->InsertMaterialObject(mat);
 
-    // ── 4. Contorno ──────────────────────────────────────────────────────
-    // Em H1 a incógnita é a pressão: tipo 0 = Dirichlet (pressão imposta),
-    // tipo 1 = Neumann (fluxo normal imposto). 1 variável de estado → val2
-    // com 1 entrada.
+    // ── 4. Boundary ──────────────────────────────────────────────────────
+    // In H1 the unknown is the pressure: type 0 = Dirichlet (imposed pressure),
+    // type 1 = Neumann (imposed normal flux). 1 state variable → val2
+    // with 1 entry.
     TPZFMatrix<STATE> val1(1, 1, 0.);
     TPZManVector<STATE, 1> val2 = {0.};
-    auto *bnd = mat->CreateBC(mat, matIdContorno, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
-    // ── 5. Construir a malha ─────────────────────────────────────────────
+    // ── 5. Build the mesh ────────────────────────────────────────────────
     cmesh->AutoBuild();
-    std::cout << "Elementos: " << cmesh->NElements()
-              << " | Equações: " << cmesh->NEquations() << std::endl;
+    std::cout << "Elements: " << cmesh->NElements()
+              << " | Equations: " << cmesh->NEquations() << std::endl;
 
-    // ── 6. Montar e resolver ─────────────────────────────────────────────
-    // Sistema H1 é SPD (diferente da formulação mista, que é ponto de sela
-    // e exige ELDLt) → ECholesky serve.
+    // ── 6. Assemble and solve ────────────────────────────────────────────
+    // The H1 system is SPD (unlike the mixed formulation, which is a saddle
+    // point and requires ELDLt) → ECholesky works.
     TPZLinearAnalysis an(cmesh);
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
     an.SetStructuralMatrix(strmat);
@@ -85,14 +85,14 @@ int main() {
     an.Assemble();
     an.Solve();
 
-    // ── 7. Pós-processamento (VTK) ───────────────────────────────────────
-    // Nomes reais do TPZDarcyFlow (ver VariableIndex): "Pressure"/"Solution"
-    // (escalar), "Flux"/"MinusKGradU" (vetor, = -K∇p), "Derivative"/"GradU",
+    // ── 7. Post-processing (VTK) ─────────────────────────────────────────
+    // Real TPZDarcyFlow names (see VariableIndex): "Pressure"/"Solution"
+    // (scalar), "Flux"/"MinusKGradU" (vector, = -K∇p), "Derivative"/"GradU",
     // "Divergence", "NormKDu".
     const TPZManVector<std::string, 1> scalnames = {"Pressure"};
     const TPZManVector<std::string, 1> vecnames = {"Flux"};
     an.DefineGraphMesh(dim, scalnames, vecnames, "darcy_h1_2d.vtk");
-    an.PostProcess(/*resolucao=*/1, dim);
+    an.PostProcess(/*resolution=*/1, dim);
 
     delete cmesh;
     delete gmesh;

@@ -1,23 +1,23 @@
-// darcy_misto.cpp — Solução de referência: Darcy 2D na formulação MISTA
-// (fluxo H(div) + pressão L2) com a API atual do NeoPZ.
+// darcy_misto.cpp — Reference solution: 2D Darcy in the MIXED formulation
+// (H(div) flux + L2 pressure) with the current NeoPZ API.
 //
-// A formulação mista exige TRÊS malhas computacionais:
-//   1. malha atômica de FLUXO    — espaço H(div), material TPZNullMaterial
-//   2. malha atômica de PRESSÃO  — espaço L2 (descontínuo), TPZNullMaterial
-//   3. malha MULTIFÍSICA         — combina as duas, e é nela que vive o
-//      material de verdade (TPZMixedDarcyFlow) e as condições de contorno.
+// The mixed formulation requires THREE computational meshes:
+//   1. atomic FLUX mesh      — H(div) space, material TPZNullMaterial
+//   2. atomic PRESSURE mesh  — L2 (discontinuous) space, TPZNullMaterial
+//   3. MULTIPHYSICS mesh     — combines the two, and it is where the real
+//      material (TPZMixedDarcyFlow) and the boundary conditions live.
 //
-// Padrão extraído e verificado de UnitTest_PZ/TestHDivCollapsed e
-// TPZMultiphysicsCompMesh.h do snapshot do NeoPZ.
+// Pattern extracted and verified from UnitTest_PZ/TestHDivCollapsed and
+// TPZMultiphysicsCompMesh.h of the NeoPZ snapshot.
 
 #include "pzgmesh.h"                  // TPZGeoMesh
 #include "TPZGeoMeshTools.h"          // TPZGeoMeshTools::CreateGeoMeshOnGrid
 #include "MMeshType.h"                // MMeshType::EQuadrilateral
 #include "pzcmesh.h"                  // TPZCompMesh
 #include "TPZMultiphysicsCompMesh.h"  // TPZMultiphysicsCompMesh
-#include "TPZNullMaterial.h"          // TPZNullMaterial (malhas atômicas)
-#include "DarcyFlow/TPZMixedDarcyFlow.h"  // TPZMixedDarcyFlow (API atual —
-                                          // prefixo da família DarcyFlow/)
+#include "TPZNullMaterial.h"          // TPZNullMaterial (atomic meshes)
+#include "DarcyFlow/TPZMixedDarcyFlow.h"  // TPZMixedDarcyFlow (current API —
+                                          // DarcyFlow/ family prefix)
 #include "TPZLinearAnalysis.h"        // TPZLinearAnalysis
 #include "pzskylstrmatrix.h"          // TPZSkylineStructMatrix
 #include "pzstepsolver.h"             // TPZStepSolver
@@ -25,21 +25,21 @@
 #include "pzfmatrix.h"                // TPZFMatrix
 #include "pzvec.h"                    // TPZVec
 
-constexpr int matIdDominio{1};
-constexpr int matIdContorno{-1};
+constexpr int matIdDomain{1};
+constexpr int matIdBoundary{-1};
 
-// ── Malha atômica de FLUXO: espaço H(div) ────────────────────────────────
-// TPZNullMaterial é só um marcador de espaço — a física fica na multifísica.
-// O contorno PRECISA de material aqui: é nele que vivem os graus de
-// liberdade de fluxo normal da fronteira.
-TPZCompMesh *CriarMalhaFluxo(TPZGeoMesh *gmesh, int dim, int pOrder) {
+// ── Atomic FLUX mesh: H(div) space ───────────────────────────────────────
+// TPZNullMaterial is only a space marker — the physics lives in the
+// multiphysics mesh. The boundary NEEDS a material here: that is where the
+// normal-flux degrees of freedom of the boundary live.
+TPZCompMesh *CreateFluxMesh(TPZGeoMesh *gmesh, int dim, int pOrder) {
     gmesh->ResetReference();
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
 
     constexpr int nstate{1};
-    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdDominio, dim, nstate));
-    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdContorno, dim - 1, nstate));
+    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdDomain, dim, nstate));
+    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdBoundary, dim - 1, nstate));
 
     cmesh->SetAllCreateFunctionsHDiv();
     cmesh->SetDefaultOrder(pOrder);
@@ -47,21 +47,21 @@ TPZCompMesh *CriarMalhaFluxo(TPZGeoMesh *gmesh, int dim, int pOrder) {
     return cmesh;
 }
 
-// ── Malha atômica de PRESSÃO: espaço L2 (elementos desconectados) ────────
-// Sem condição de contorno: pressão não tem grau de liberdade na fronteira
-// na formulação mista. SetLagrangeMultiplier(1) define a ordem de montagem
-// (condensação) — sem isso a resolução pode falhar.
-TPZCompMesh *CriarMalhaPressao(TPZGeoMesh *gmesh, int dim, int pOrder) {
+// ── Atomic PRESSURE mesh: L2 space (disconnected elements) ───────────────
+// No boundary condition: in the mixed formulation the pressure has no degree
+// of freedom on the boundary. SetLagrangeMultiplier(1) sets the assembly
+// (condensation) order — without it the solution may fail.
+TPZCompMesh *CreatePressureMesh(TPZGeoMesh *gmesh, int dim, int pOrder) {
     gmesh->ResetReference();
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
 
     constexpr int nstate{1};
-    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdDominio, dim, nstate));
+    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdDomain, dim, nstate));
 
     cmesh->SetAllCreateFunctionsContinuous();
-    cmesh->ApproxSpace().CreateDisconnectedElements(true);  // L2: contínuo POR elemento
+    cmesh->ApproxSpace().CreateDisconnectedElements(true);  // L2: continuous PER element
     cmesh->AutoBuild();
 
     for (int64_t i = 0; i < cmesh->NConnects(); i++) {
@@ -71,59 +71,59 @@ TPZCompMesh *CriarMalhaPressao(TPZGeoMesh *gmesh, int dim, int pOrder) {
 }
 
 int main() {
-    // ── 1. Malha geométrica (mesma receita das demais) ───────────────────
+    // ── 1. Geometric mesh (same recipe as the others) ────────────────────
     constexpr int dim{2};
     constexpr int pOrder{1};
     const TPZManVector<REAL, 3> minX = {0., 0., 0.};
     const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
     const TPZManVector<int, 2> nDivs = {8, 8};
-    const TPZManVector<int, 5> matIds = {matIdDominio, matIdContorno,
-                                         matIdContorno, matIdContorno,
-                                         matIdContorno};
+    const TPZManVector<int, 5> matIds = {matIdDomain, matIdBoundary,
+                                         matIdBoundary, matIdBoundary,
+                                         matIdBoundary};
     TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
         dim, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral,
         /*createBoundEls=*/true);
 
-    // ── 2. Malhas atômicas (fluxo H(div) + pressão L2) ───────────────────
-    TPZCompMesh *cmeshFluxo   = CriarMalhaFluxo(gmesh, dim, pOrder);
-    TPZCompMesh *cmeshPressao = CriarMalhaPressao(gmesh, dim, pOrder);
+    // ── 2. Atomic meshes (H(div) flux + L2 pressure) ─────────────────────
+    TPZCompMesh *cmeshFlux     = CreateFluxMesh(gmesh, dim, pOrder);
+    TPZCompMesh *cmeshPressure = CreatePressureMesh(gmesh, dim, pOrder);
 
-    // ── 3. Malha multifísica: física + contorno moram AQUI ───────────────
+    // ── 3. Multiphysics mesh: physics + boundary live HERE ───────────────
     gmesh->ResetReference();
     auto *cmesh = new TPZMultiphysicsCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
 
-    auto *mat = new TPZMixedDarcyFlow(matIdDominio, dim);
+    auto *mat = new TPZMixedDarcyFlow(matIdDomain, dim);
     mat->SetConstantPermeability(1.);
     mat->SetForcingFunction(
         [](const TPZVec<REAL> &loc, TPZVec<STATE> &result) {
-            result[0] = 1.;  // termo fonte f = 1
+            result[0] = 1.;  // source term f = 1
         },
         pOrder);
     cmesh->InsertMaterialObject(mat);
 
-    // Contorno na formulação mista: tipo 0 impõe PRESSÃO, tipo 1 impõe
-    // FLUXO NORMAL. Aqui: pressão nula em toda a fronteira.
+    // Boundary in the mixed formulation: type 0 imposes PRESSURE, type 1
+    // imposes NORMAL FLUX. Here: zero pressure on the whole boundary.
     TPZFMatrix<STATE> val1(1, 1, 0.);
     TPZManVector<STATE, 1> val2 = {0.};
-    auto *bnd = mat->CreateBC(mat, matIdContorno, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
-    // O estilo do espaço PRECISA ser definido como multifísico ANTES do
-    // BuildMultiphysicsSpace — sem isso, DebugStop em
-    // TPZMultiphysicsCompMesh.cpp:94 (descoberto executando esta receita).
+    // The space style MUST be set to multiphysics BEFORE
+    // BuildMultiphysicsSpace — without it, DebugStop in
+    // TPZMultiphysicsCompMesh.cpp:94 (found by running this recipe).
     cmesh->SetAllCreateFunctionsMultiphysicElem();
 
-    // Combina as malhas atômicas (fluxo PRIMEIRO, pressão depois) —
-    // substitui o AutoBuild da malha multifísica.
-    TPZManVector<TPZCompMesh *, 2> malhas = {cmeshFluxo, cmeshPressao};
-    TPZManVector<int, 2> ativas = {1, 1};
-    cmesh->BuildMultiphysicsSpace(ativas, malhas);
+    // Combines the atomic meshes (flux FIRST, pressure second) —
+    // replaces AutoBuild for the multiphysics mesh.
+    TPZManVector<TPZCompMesh *, 2> meshes = {cmeshFlux, cmeshPressure};
+    TPZManVector<int, 2> active = {1, 1};
+    cmesh->BuildMultiphysicsSpace(active, meshes);
 
-    // ── 4. Montar e resolver ─────────────────────────────────────────────
-    // ATENÇÃO: o sistema misto é de PONTO DE SELA (indefinido) —
-    // ECholesky NÃO funciona; usar ELDLt (ou ELU).
+    // ── 4. Assemble and solve ────────────────────────────────────────────
+    // WARNING: the mixed system is a SADDLE POINT (indefinite) problem —
+    // ECholesky does NOT work; use ELDLt (or ELU).
     TPZLinearAnalysis an(cmesh);
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
     an.SetStructuralMatrix(strmat);
@@ -133,17 +133,17 @@ int main() {
     an.Assemble();
     an.Solve();
 
-    // ── 5. Pós-processamento (VTK) ───────────────────────────────────────
-    // Nomes reais do TPZMixedDarcyFlow (ver VariableIndex): "Pressure"
-    // (escalar), "Flux" (vetor), "DivFlux" (escalar).
+    // ── 5. Post-processing (VTK) ─────────────────────────────────────────
+    // Real TPZMixedDarcyFlow names (see VariableIndex): "Pressure"
+    // (scalar), "Flux" (vector), "DivFlux" (scalar).
     const TPZManVector<std::string, 2> scalnames = {"Pressure", "DivFlux"};
     const TPZManVector<std::string, 1> vecnames = {"Flux"};
-    an.DefineGraphMesh(dim, scalnames, vecnames, "darcy_misto2d.vtk");
-    an.PostProcess(/*resolucao=*/1, dim);
+    an.DefineGraphMesh(dim, scalnames, vecnames, "darcy_mixed2d.vtk");
+    an.PostProcess(/*resolution=*/1, dim);
 
     delete cmesh;
-    delete cmeshFluxo;
-    delete cmeshPressao;
+    delete cmeshFlux;
+    delete cmeshPressure;
     delete gmesh;
     return 0;
 }

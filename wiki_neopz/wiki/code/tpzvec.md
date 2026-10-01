@@ -1,31 +1,31 @@
-# Estruturas de Dados Básicas: TPZVec
+# Basic Data Structures: TPZVec
 
-Esta página serve como catálogo da estrutura TPZVec do NeoPZ, para a qual **não deve** ser gerado código "inventado". Siga o exemplo de sintaxe abaixo estritamente.
+This page is a catalog of the NeoPZ TPZVec structure, for which **no** "invented" code should be generated. Follow the syntax example below strictly.
 
-## `TPZVec` (Vetor do NeoPZ)
-Classe template de vetor utilizada extensivamente ao longo do NeoPZ. Substitui frequentemente o `std::vector` nas assinaturas da API.
+## `TPZVec` (NeoPZ vector)
+Template vector class used extensively throughout NeoPZ. It often replaces `std::vector` in the API signatures.
 
 **Header**: `#include "pzvec.h"`
 
-### Exemplo de Uso
+### Usage example
 ```cpp
 #include "pzvec.h"
 #include <iostream>
 
 int main() {
-    // Inicializando um vetor de 3 elementos de ponto flutuante
+    // Initializing a vector of 3 floating-point elements
     TPZVec<REAL> coord(3, 0.0);
-    
-    // Acessando os elementos (funciona como um array normal)
+
+    // Accessing the elements (works like a normal array)
     coord[0] = 1.0;
     coord[1] = 2.5;
     coord[2] = -1.0;
-    
-    // Iterando sobre o vetor (tamanho é obtido com .size())
+
+    // Iterating over the vector (the size is obtained with .size())
     for (int i = 0; i < coord.size(); i++) {
         std::cout << coord[i] << std::endl;
     }
-    
+
     return 0;
 }
 ```
