@@ -17,8 +17,10 @@
 - Benchmark, fully local and without spending Gemini quota:
   `env -u GOOGLE_API_KEY LLM_CACHE=1 uv run eval_benchmark.py`
   (`--agente` for the agent mode, `--grupo com_receita|sem_receita`, `--casos a,b`).
-  The prompt is not fully deterministic across runs (the Chroma MMR pool varies), so
-  some cases may miss the cache and call the local model.
+  Retrieval is exact and deterministic (`pipeline/banco.py` replaces Chroma's approximate
+  HNSW search), so the same question always yields the same prompt and hits the cache.
+- Slow determinism test (loads the index in 2 processes):
+  `TESTE_DETERMINISMO=1 uv run python -m unittest tests.test_banco`
 - RAG vs agent on one question: `uv run compare_agente_rag.py "<question>" "<suffix>"`
 
 ## Conventions

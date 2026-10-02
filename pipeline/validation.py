@@ -23,7 +23,7 @@ def _validar_codigo(codigo: str, whitelist: set) -> list:
     if not whitelist:
         return []
     usadas = find_tpz_classes_in_code(codigo)
-    return [c for c in usadas if c not in whitelist]
+    return sorted(c for c in usadas if c not in whitelist)
 
 _INCLUDE_RE       = re.compile(r'#include\s*[<"]([^>"]+\.h)[>"]')
 _INCLUDE_ASPAS_RE = re.compile(r'#include\s*"([^"]+\.h)"')

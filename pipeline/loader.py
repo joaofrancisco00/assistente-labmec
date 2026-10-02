@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from .banco import BancoExato
 from .config import (
     WHITELIST_FILE,
     HEADERS_WHITELIST_FILE,
@@ -99,6 +100,8 @@ def _carregar_bancos(embeddings):
         embedding_function=embeddings,
         collection_name=COL_EXAMPLES,
     )
+    headers_db = BancoExato.de_chroma(headers_db)
+    examples_db = BancoExato.de_chroma(examples_db)
     wiki_db = None
     try:
         candidate = Chroma(
@@ -107,7 +110,7 @@ def _carregar_bancos(embeddings):
             collection_name=COL_WIKI,
         )
         if candidate._collection.count() > 0:
-            wiki_db = candidate
+            wiki_db = BancoExato.de_chroma(candidate)
             print(f"  Wiki indexada: {candidate._collection.count()} chunks disponíveis")
         else:
             print("  Wiki não indexada ainda (rode indexer_wiki.py para ativá-la)")
