@@ -24,6 +24,10 @@ _DEF_TOPO_RE = re.compile(
 def _extrair_blocos_codigo(resposta: str) -> str:
     return "\n".join(b.strip() for b in _BLOCO_CODIGO_RE.findall(resposta) if b.strip())
 
+def _programa_completo(resposta: str) -> bool:
+    blocos = [b for b in _BLOCO_CODIGO_RE.findall(resposta) if b.strip()]
+    return len(blocos) == 1 and len(_MAIN_RE.findall(blocos[0])) == 1
+
 def _montar_tu(codigo: str) -> str:
     includes, corpo = [], []
     for linha in codigo.splitlines():
@@ -137,10 +141,11 @@ def _compilar_codigo(resposta: str, timeout: int = TIMEOUT_COMPILACAO) -> dict:
         return {"status": "ok", "erros": [], "ignorados": 0}
 
     mensagens = _LINHA_ERRO_RE.findall(proc.stderr)
+    completo = _programa_completo(resposta)
     relevantes, ignorados = [], 0
     for msg in mensagens:
         msg = msg.strip()
-        if _erro_denuncia_alucinacao(msg):
+        if completo or _erro_denuncia_alucinacao(msg):
             if msg not in relevantes:
                 relevantes.append(msg)
         else:

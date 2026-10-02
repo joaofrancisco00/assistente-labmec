@@ -164,6 +164,26 @@ class TestCompilacaoDeVerdade(unittest.TestCase):
         self.assertEqual(r["status"], "inconclusivo", r["erros"])
         self.assertGreater(r["ignorados"], 0)
 
+    PROGRAMA_SEM_INCLUDE = ('#include "pzgmesh.h"\n'
+                            '#include "TPZAcademicGeoMesh.h"\n'
+                            'int main() {\n'
+                            '    TPZGeoMesh *g = new TPZGeoMesh();\n'
+                            '    auto tipo = MMeshType::EHexahedral;\n'
+                            '    return 0;\n'
+                            '}')
+
+    def test_programa_completo_nao_tem_recorte_para_culpar(self):
+        r = pipeline._compilar_codigo(bloco(self.PROGRAMA_SEM_INCLUDE))
+        self.assertEqual(r["status"], "erros")
+        self.assertTrue(any("MMeshType" in e for e in r["erros"]), r["erros"])
+
+    def test_programa_com_trecho_extra_continua_conservador(self):
+        resposta = (bloco(self.PROGRAMA_SEM_INCLUDE.replace(
+                        "int main", '#include "MMeshType.h"\nint main'))
+                    + "\nAlternatively:\n\n```cpp\ngmesh->BuildConnectivity();\n```\n")
+        r = pipeline._compilar_codigo(resposta)
+        self.assertEqual(r["status"], "inconclusivo", r["erros"])
+
 
 @unittest.skipUnless(pipeline.METHODS_WHITELIST_FILE.exists(),
                      "whitelist de métodos não gerada (rode indexer.py)")
