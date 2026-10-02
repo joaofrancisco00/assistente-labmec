@@ -230,7 +230,8 @@ CASOS = [
             "validacao_limpa":     lambda r: r["valido"],
             "compilou":            _compilou,
             "material_correto":    lambda r: "TPZMatPoisson" in r["resposta"],
-            "malha_hexaedrica":    lambda r: "EHexahedral" in r["resposta"],
+            "malha_hexaedrica":    lambda r: ("MMeshType::EHexahedral" in r["resposta"]
+                                              or "TPZAcademicGeoMesh::EHexa" in r["resposta"]),
             "dimensao_3d":         lambda r: _DIM_3_RE.search(r["resposta"]) is not None,
             "sem_api_antiga":      lambda r: not r["classes_legado"],
         },
