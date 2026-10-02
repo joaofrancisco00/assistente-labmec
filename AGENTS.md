@@ -16,6 +16,9 @@
   (rebuilds only the `neopz_wiki` collection of `banco_chroma_develop/`).
 - Benchmark, fully local and without spending Gemini quota:
   `env -u GOOGLE_API_KEY LLM_CACHE=1 uv run eval_benchmark.py`
+  (`--agente` for the agent mode, `--grupo com_receita|sem_receita`, `--casos a,b`).
+  The prompt is not fully deterministic across runs (the Chroma MMR pool varies), so
+  some cases may miss the cache and call the local model.
 - RAG vs agent on one question: `uv run compare_agente_rag.py "<question>" "<suffix>"`
 
 ## Conventions
@@ -26,3 +29,5 @@
 - Every recipe in `wiki_neopz/wiki/flows/` mirrors a `.cpp` in
   `reference_solutions/task_*/` (copy of the `.md` kept next to it).
 - `GOOGLE_API_KEY` lives in `.env` (git-ignored); Gemini free tier is ~20 requests/day.
+- Commits: no Devin watermark — no "Generated with Devin" line and no `Co-Authored-By` trailer.
+  Message style: `type: resumo em portugues sem acentos` + body explaining the why.

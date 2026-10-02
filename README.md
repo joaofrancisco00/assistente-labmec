@@ -100,7 +100,7 @@ Toda resposta vem com um selo no rodapé:
 | `header_index/` | Tabela determinística para o corretor automático de `#include` |
 | `banco_chroma_develop/` | Índice vetorial + whitelists (gerado; fora do git) |
 | `base_de_dados/neopz/` | Código do NeoPZ (submodule pinado em `852a5116c`) |
-| `eval_benchmark.py` | Benchmark automático de qualidade (6 perguntas, 35 checks) |
+| `eval_benchmark.py` | Benchmark automático de qualidade (12 perguntas, 64 checks; RAG ou agente) |
 | `logs/` | Logs de interações e resultados de benchmark |
 | `tests/` | Testes de regressão (`python3 -m unittest discover -s tests`) |
 
@@ -132,10 +132,18 @@ na whitelist.
 Antes e depois de mudar prompt, receitas ou índice, rode:
 
 ```bash
-uv run eval_benchmark.py    # benchmark de código (~10 min)
+uv run eval_benchmark.py                        # 12 casos, pipeline RAG (~20 min local)
+uv run eval_benchmark.py --agente               # mesmos casos, modo agente
+uv run eval_benchmark.py --grupo sem_receita    # só os casos sem receita
+uv run eval_benchmark.py --casos snippet_vtk    # casos específicos (poupa a cota do Gemini)
 ```
 
-Acusa regressão silenciosa se a nota cair.
+Acusa regressão silenciosa se a nota cair. O placar sai separado em dois
+grupos: **com receita** (Poisson, elasticidade e Darcy 2D, que têm receita
+quase idêntica em `wiki/flows/` e medem se o modelo segue a receita) e **sem
+receita** (3D, refinamento, H(div), snippets e perguntas conceituais, que
+medem generalização). Cada rodada vai para `logs/eval_<data>.json` (ou
+`logs/eval_agente_<data>.json`), com as respostas completas.
 
 Se você mexeu só em código determinístico (corretores, validação, regras
 semânticas, selo do rodapé), rode com o **cache do LLM** para não gastar a
