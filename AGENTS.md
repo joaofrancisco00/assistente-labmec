@@ -12,6 +12,7 @@
   ```
   Then run each binary in `reference_solutions/build_develop/` — compiling is not
   enough (e.g. PostProcessError and manual node allocation bugs only show at runtime).
+- Regenerate only the enum values index (no Chroma reindex): `uv run indexer.py --so-enums`
 - Reindex the wiki after editing `wiki_neopz/wiki/**`: `uv run indexer_wiki.py`
   (rebuilds only the `neopz_wiki` collection of `banco_chroma_develop/`).
 - Benchmark, fully local and without spending Gemini quota:

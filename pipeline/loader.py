@@ -7,6 +7,7 @@ from .config import (
     HEADERS_WHITELIST_FILE,
     METHODS_WHITELIST_FILE,
     CLASS_METHODS_INDEX_FILE,
+    ENUM_VALUES_INDEX_FILE,
     CLASS_HEADER_INDEX_FILE,
     LEGACY_CLASSES_FILE,
     RENAMES_FILE,
@@ -48,6 +49,14 @@ def _carregar_class_methods_index() -> dict:
         return {}
     dados = json.loads(CLASS_METHODS_INDEX_FILE.read_text(encoding='utf-8'))
     print(f"  Índice classe→métodos: {len(dados)} classes mapeadas")
+    return dados
+
+def _carregar_enum_values_index() -> dict:
+    if not ENUM_VALUES_INDEX_FILE.exists():
+        print("⚠️  enum_values_index.json não encontrado — rode `uv run indexer.py --so-enums`.")
+        return {}
+    dados = json.loads(ENUM_VALUES_INDEX_FILE.read_text(encoding='utf-8'))
+    print(f"  Índice de enums: {len(dados)} enums mapeados")
     return dados
 
 def _carregar_class_header_index() -> dict:

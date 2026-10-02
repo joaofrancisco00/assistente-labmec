@@ -10,6 +10,7 @@ Diferenças em relação ao indexer anterior:
             + parse único dos headers (whitelists e índices derivados dele)
 """
 import re
+import sys
 from pathlib import Path
 from tqdm import tqdm
 
@@ -32,6 +33,7 @@ from pipeline.cpp_parser import (
     build_header_whitelist,
     build_method_whitelist_from_chunks,
     build_class_methods_index_from_chunks,
+    build_enum_values_index,
 )
 
 # ── Configurações ──────────────────────────────────────────────────────────────
@@ -42,6 +44,7 @@ LEGACY_CLASSES_FILE     = INDEX_DIR / "legacy_classes.txt"
 HEADERS_WHITELIST_FILE  = INDEX_DIR / "headers_whitelist.txt"
 METHODS_WHITELIST_FILE  = INDEX_DIR / "methods_whitelist.txt"
 CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
+ENUM_VALUES_INDEX_FILE  = INDEX_DIR / "enum_values_index.json"
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 
 # Nomes das coleções no ChromaDB (não mudar depois de indexado)
@@ -303,6 +306,19 @@ def _gerar_whitelist(chunks_por_arquivo: dict):
         )
         print(f"  ✅ {len(class_methods)} classes mapeadas em class_methods_index.json")
 
+    _gerar_indice_enums()
+
+
+def _gerar_indice_enums():
+    enums = build_enum_values_index(BASE_DIR)
+    if not enums:
+        print("  ⚠️  Índice de enums vazio.")
+        return
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    ENUM_VALUES_INDEX_FILE.write_text(
+        json.dumps(enums, indent=2, sort_keys=True, ensure_ascii=False), encoding='utf-8')
+    print(f"  ✅ {len(enums)} enums mapeados em enum_values_index.json")
+
 
 def main():
     print("=" * 55)
@@ -315,6 +331,10 @@ def main():
         return
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+    if "--so-enums" in sys.argv:
+        _gerar_indice_enums()
+        return
 
     chunks_por_arquivo = _parsear_headers()
     _gerar_whitelist(chunks_por_arquivo)

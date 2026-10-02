@@ -2,11 +2,11 @@ import difflib
 import re
 from pathlib import Path
 
-from .cpp_parser import find_tpz_classes_in_code, find_suspicious_method_calls
+from .cpp_parser import find_enum_value_uses, find_tpz_classes_in_code, find_suspicious_method_calls
 from .config import (
     HEADERS_SISTEMA,
 )
-from .compilation import _neopz_prefix, _include_flags
+from .compilation import _extrair_blocos_codigo, _neopz_prefix, _include_flags
 
 def _resposta_contem_codigo(resposta: str) -> bool:
     if "```" in resposta:
@@ -114,3 +114,38 @@ def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set, class_
     if not methods_whitelist:
         return [], []
     return find_suspicious_method_calls(codigo, methods_whitelist, whitelist, class_methods_index)
+
+
+_COMENTARIO_CPP_RE = re.compile(r'//[^\n]*|/\*.*?\*/', re.DOTALL)
+
+
+def _validar_enums(codigo: str, enum_index: dict) -> dict:
+    if not enum_index:
+        return {}
+    codigo = _COMENTARIO_CPP_RE.sub("", _extrair_blocos_codigo(codigo) or codigo)
+    invalidos = {}
+    for enum, valor in find_enum_value_uses(codigo, enum_index):
+        if valor in {v for v, _ in enum_index[enum]}:
+            continue
+        onde_existe = sorted(k for k, vals in enum_index.items()
+                             if k != enum and k.split("::")[-1] == enum
+                             and valor in {v for v, _ in vals})
+        invalidos[f"{enum}::{valor}"] = {"enum": enum, "validos": enum_index[enum],
+                                         "existe_em": onde_existe}
+    return invalidos
+
+
+_MAX_VALORES_ENUM = 20
+
+
+def _descrever_enum_invalido(chave: str, info: dict) -> str:
+    enum, valor = info["enum"], chave.split("::")[-1]
+    validos = ", ".join(f"{v} ({c})" if c else v for v, c in info["validos"][:_MAX_VALORES_ENUM])
+    if len(info["validos"]) > _MAX_VALORES_ENUM:
+        validos += ", ..."
+    texto = f"'{chave}' does not exist. Valid values of {enum}: {validos}"
+    if info["existe_em"]:
+        outros = ", ".join(f"{k}::{valor}" for k in info["existe_em"])
+        texto += (f". Note: '{valor}' belongs to a DIFFERENT enum with the same name "
+                  f"({outros}), which is only accepted by that class")
+    return texto

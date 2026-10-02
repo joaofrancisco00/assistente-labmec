@@ -401,6 +401,92 @@ def build_header_whitelist(base_path: Path) -> set:
     return headers
 
 
+_ENUM_DECL_RE = re.compile(
+    r'\benum\s+(?:class\s+|struct\s+)?([A-Za-z_]\w*)\s*(?::\s*[\w:\s]+?)?\{([^{}]*)\}', re.DOTALL)
+_ENUM_TOKEN_RE = re.compile(
+    r'/\*(.*?)\*/|//([^\n]*)|([A-Za-z_]\w*)(\s*=\s*[^,{}]*?(?=,|//|/\*|$))?', re.DOTALL)
+_ENUM_NOME_MINIMO = 4
+
+
+def _limpar_comentario_enum(texto: str) -> str:
+    texto = re.sub(r'^[\s*!</]+', '', texto.strip())
+    texto = re.sub(r'@\w+\s*', '', texto)
+    return " ".join(texto.split())[:80]
+
+
+_ESCOPO_RE = re.compile(r'(?<!enum )\b(?:class|struct|namespace)\s+([A-Za-z_]\w*)[^;{}()]*\{')
+
+
+def _escopos(content: str) -> list:
+    escopos = []
+    for m in _ESCOPO_RE.finditer(content):
+        abre = m.end() - 1
+        fecha = _find_matching_brace(content, abre)
+        if fecha != -1:
+            escopos.append((abre, fecha, m.group(1)))
+    return escopos
+
+
+def _qualificar(nome: str, pos: int, escopos: list) -> str:
+    externos = sorted((e for e in escopos if e[0] < pos < e[1]), key=lambda e: e[0])
+    return "::".join([e[2] for e in externos] + [nome])
+
+
+def extract_enum_values(content: str) -> dict:
+    enums = {}
+    escopos = _escopos(content)
+    for decl in _ENUM_DECL_RE.finditer(content):
+        nome, corpo = _qualificar(decl.group(1), decl.start(), escopos), decl.group(2)
+        valores, fim_ultimo = [], None
+        comentario_pendente = ""
+        for tok in _ENUM_TOKEN_RE.finditer(corpo):
+            comentario = tok.group(1) if tok.group(1) is not None else tok.group(2)
+            if comentario is not None:
+                texto = _limpar_comentario_enum(comentario)
+                mesma_linha = (fim_ultimo is not None
+                               and "\n" not in corpo[fim_ultimo:tok.start()])
+                if mesma_linha and valores and not valores[-1][1]:
+                    valores[-1][1] = texto
+                else:
+                    comentario_pendente = texto
+            elif tok.group(3):
+                valores.append([tok.group(3), comentario_pendente])
+                comentario_pendente = ""
+                fim_ultimo = tok.end()
+        if valores:
+            enums[nome] = [tuple(v) for v in valores]
+    return enums
+
+
+def build_enum_values_index(base_path: Path) -> dict:
+    declaracoes = {}
+    for h_file in sorted(base_path.rglob("*.h")):
+        try:
+            content = h_file.read_text(encoding='utf-8', errors='replace')
+        except Exception:
+            continue
+        for nome, valores in extract_enum_values(content).items():
+            declaracoes.setdefault(nome, []).append(valores)
+    indice = {}
+    for nome, versoes in declaracoes.items():
+        nomes_por_versao = {tuple(v for v, _ in valores) for valores in versoes}
+        if len(nome) >= _ENUM_NOME_MINIMO and len(nomes_por_versao) == 1:
+            indice[nome] = [list(v) for v in versoes[0]]
+    return indice
+
+
+_USO_ENUM_RE = re.compile(r'(?<![\w:])(?=([A-Za-z_]\w*)\s*::\s*([A-Za-z_]\w*)\b)')
+
+
+def find_enum_value_uses(code: str, enum_index: dict) -> list:
+    usos = []
+    for m in _USO_ENUM_RE.finditer(code):
+        enum, valor = m.group(1), m.group(2)
+        if enum in enum_index:
+            usos.append((enum, valor))
+    return usos
+
+
 def find_tpz_classes_in_code(code: str) -> set:
     """Extrai todos os identificadores TPZxxx usados em um trecho de código."""
     return set(re.findall(r'\bTPZ[A-Z]\w+', code))

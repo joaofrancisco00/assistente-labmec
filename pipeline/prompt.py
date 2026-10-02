@@ -2,6 +2,7 @@ import difflib
 from pathlib import Path
 
 from .correction import _sugerir_correcoes
+from .validation import _descrever_enum_invalido
 
 def _formatar_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> str:
     partes = []
@@ -74,6 +75,7 @@ def _montar_prompt(
     erros_aridade: list = None,
     erros_compilacao: list = None,
     erros_semanticos: list = None,
+    enums_invalidos: dict = None,
     classes_contexto: set = None,
     renames: dict = None,
     historico: list = None,
@@ -156,6 +158,13 @@ def _montar_prompt(
             "\n\n⚠️ ARITY ERROR (WRONG NUMBER OF ARGUMENTS):\n"
             + "\n".join(f"  - {e}" for e in erros_aridade)
             + "\nCheck the correct method signature in the provided class declarations."
+        )
+
+    if enums_invalidos:
+        instrucao_correcao += (
+            "\n\n⚠️ INVALID ENUM VALUES:\n"
+            + "\n".join(f"  - {_descrever_enum_invalido(k, i)}" for k, i in enums_invalidos.items())
+            + "\nUse ONLY one of the valid values listed above, choosing by its description."
         )
 
     if erros_compilacao:

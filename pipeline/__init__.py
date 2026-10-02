@@ -47,6 +47,7 @@ from .loader import (
     _carregar_headers_whitelist,
     _carregar_methods_whitelist,
     _carregar_class_methods_index,
+    _carregar_enum_values_index,
     _carregar_class_header_index,
     _carregar_legacy_classes,
     _carregar_renames,
@@ -81,6 +82,8 @@ from .validation import (
     _classes_indisponiveis,
     _validar_includes_por_classe,
     _validar_metodos,
+    _validar_enums,
+    _descrever_enum_invalido,
 )
 
 from .correction import (
@@ -89,6 +92,7 @@ from .correction import (
     _corrigir_classes_automaticamente,
     _corrigir_metodos_automaticamente,
     _corrigir_includes_automaticamente,
+    _corrigir_enums_automaticamente,
 )
 
 from .compilation import (
@@ -147,6 +151,7 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
             "erros_semanticos":      resultado.get("erros_semanticos", []),
             "includes_errados":      sorted(resultado["includes"].keys()),
             "metodos_suspeitos":     [f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]],
+            "enums_invalidos":       sorted(resultado.get("enums_invalidos", {})),
             "compilacao":            resultado.get("compilacao", {}).get("status", "nao_executada"),
             "erros_compilacao":      resultado.get("compilacao", {}).get("erros", []),
             "classes_legado":        resultado.get("classes_legado", []),
@@ -180,6 +185,7 @@ def _recursos_validacao(ctx) -> dict:
         collisions=ctx.collisions or {},
         renames=ctx.renames or {},
         legacy_classes=ctx.legacy_classes or set(),
+        enum_values_index=getattr(ctx, "enum_values_index", None) or {},
         destinos=_whitelist_utilizavel(ctx.whitelist, class_header_index),
     )
 
@@ -187,7 +193,7 @@ def _recursos_validacao(ctx) -> dict:
 def _verificar_resposta(
     resposta: str, *, whitelist, headers_whitelist, methods_whitelist,
     class_header_index, class_methods_index, collisions, renames,
-    legacy_classes, destinos, on_evento=None,
+    legacy_classes, destinos, enum_values_index=None, on_evento=None,
 ) -> dict:
     tem_codigo = _resposta_contem_codigo(resposta)
     correcoes_automaticas = []
@@ -195,6 +201,9 @@ def _verificar_resposta(
         resposta, correcoes_classes = _corrigir_classes_automaticamente(
             resposta, whitelist, renames, destinos=destinos)
         correcoes_automaticas.extend(correcoes_classes)
+
+        resposta, correcoes_enums = _corrigir_enums_automaticamente(resposta, enum_values_index)
+        correcoes_automaticas.extend(correcoes_enums)
 
         metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
         resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
@@ -217,12 +226,14 @@ def _verificar_resposta(
         includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
         metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
         erros_semanticos = validar_semantica(resposta)
+        enums_invalidos = _validar_enums(resposta, enum_values_index)
     else:
         includes_errados = {}
         includes_por_classe = {}
         metodos_suspeitos = []
         erros_aridade = []
         erros_semanticos = []
+        enums_invalidos = {}
 
     classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
 
@@ -231,7 +242,7 @@ def _verificar_resposta(
 
     nomes_ok = not (classes_alucinadas or includes_errados
                     or includes_por_classe or metodos_suspeitos
-                    or erros_aridade or erros_semanticos)
+                    or erros_aridade or erros_semanticos or enums_invalidos)
 
     compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
     if nomes_ok and tem_codigo and classes_indisponiveis:
@@ -273,6 +284,8 @@ def _verificar_resposta(
         print(f"  ⚠️  Erro de Aridade: {erro}")
     for erro in erros_semanticos:
         print(f"  ⚠️  Erro Semântico: {erro}")
+    if enums_invalidos:
+        print(f"  ⚠️  Valores de enum inexistentes: {', '.join(enums_invalidos)}")
 
     return {
         "resposta":              resposta,
@@ -285,6 +298,7 @@ def _verificar_resposta(
         "includes":              includes_errados or {},
         "includes_por_classe":   includes_por_classe or {},
         "metodos_suspeitos":     metodos_suspeitos or [],
+        "enums_invalidos":       enums_invalidos,
         "compilacao":            compilacao,
         "classes_legado":        classes_legado_usadas,
         "classes_indisponiveis": classes_indisponiveis,
@@ -305,6 +319,8 @@ def _descrever_problemas(v: dict) -> list:
         problemas.append("Methods not found in NeoPZ: " + ", ".join(
             f"{c}::{m}" for c, m in v["metodos_suspeitos"]))
     problemas.extend(f"Signature error (arity): {e}" for e in v["erros_aridade"])
+    problemas.extend(f"Invalid enum value: {_descrever_enum_invalido(k, i)}"
+                     for k, i in v["enums_invalidos"].items())
     problemas.extend(f"Domain rule violated: {e}" for e in v["erros_semanticos"])
     problemas.extend(f"Compiler error: {e}" for e in v["compilacao"]["erros"])
     return problemas
@@ -314,7 +330,7 @@ def _resultado_de(v: dict, valido: bool, fontes, tentativas: int) -> dict:
     return {
         **{k: v[k] for k in ("resposta", "alucinacoes", "erros_aridade", "erros_semanticos",
                              "includes", "includes_por_classe", "metodos_suspeitos",
-                             "compilacao", "classes_legado", "classes_indisponiveis",
+                             "enums_invalidos", "compilacao", "classes_legado", "classes_indisponiveis",
                              "correcoes_automaticas")},
         "valido":         valido,
         "fontes_nao_api": sorted(f for f in fontes if _fora_da_api(f) == "teste/benchmark"),
@@ -338,6 +354,7 @@ def gerar_codigo(
     collisions: dict = None, wiki_db=None,
     methods_whitelist: set = None, class_methods_index: dict = None,
     renames: dict = None, legacy_classes: set = None,
+    enum_values_index: dict = None,
 ) -> dict:
     import difflib
 
@@ -355,6 +372,7 @@ def gerar_codigo(
         collisions         = ctx.collisions
         renames            = ctx.renames
         legacy_classes     = ctx.legacy_classes
+        enum_values_index  = ctx.enum_values_index
         system_base        = ctx.system_base
 
     recursos = _recursos_validacao(PipelineContext(
@@ -363,6 +381,7 @@ def gerar_codigo(
         methods_whitelist=methods_whitelist, class_header_index=class_header_index,
         class_methods_index=class_methods_index, collisions=collisions,
         renames=renames, legacy_classes=legacy_classes, system_base=system_base,
+        enum_values_index=enum_values_index or {},
     ))
     methods_whitelist = recursos["methods_whitelist"]
     renames = recursos["renames"]
@@ -374,6 +393,7 @@ def gerar_codigo(
     metodos_suspeitos = None
     erros_compilacao = None
     erros_semanticos = None
+    enums_invalidos = None
     nomes_ok = False
 
     melhor = None
@@ -398,6 +418,7 @@ def gerar_codigo(
             metodos_suspeitos, methods_whitelist,
             erros_compilacao=erros_compilacao,
             erros_semanticos=erros_semanticos,
+            enums_invalidos=enums_invalidos,
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
             renames=renames,
             historico=historico,
@@ -452,6 +473,7 @@ def gerar_codigo(
         includes_por_classe = v["includes_por_classe"]
         metodos_suspeitos = v["metodos_suspeitos"]
         erros_semanticos = v["erros_semanticos"]
+        enums_invalidos = v["enums_invalidos"]
         erros_compilacao = v["compilacao"]["erros"] or None
 
         if v["valido"]:
@@ -564,6 +586,10 @@ def main():
         if resultado["metodos_suspeitos"]:
             metodos_fmt = ", ".join(f"{c}::{m}" for c, m in resultado["metodos_suspeitos"])
             print(f"⚠️  Methods not found in NeoPZ (global whitelist): {metodos_fmt}")
+        if resultado.get("enums_invalidos"):
+            print("⚠️  Invalid enum values:")
+            for chave, info in resultado["enums_invalidos"].items():
+                print(f"   - {_descrever_enum_invalido(chave, info)}")
         if resultado.get("erros_semanticos"):
             print("⚠️  Semantic errors (domain rules violated):")
             for erro in resultado["erros_semanticos"]:

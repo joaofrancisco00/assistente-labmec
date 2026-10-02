@@ -2,10 +2,11 @@ import difflib
 import re
 from pathlib import Path
 
-from .cpp_parser import find_tpz_classes_in_code
+from .cpp_parser import find_enum_value_uses, find_tpz_classes_in_code
 from .config import (
     CUTOFF_CLASSE_AUTOMATICA,
     CUTOFF_METODO_AUTOMATICO,
+    CUTOFF_ENUM_AUTOMATICO,
     INCLUDES_LIXO_CONHECIDOS,
 )
 from .validation import _motivo_indisponivel, _include_para_header
@@ -172,3 +173,34 @@ def _corrigir_includes_automaticamente(
                 correcoes += [f'{c}: + #include "{forma_certa}"' for c, forma_certa in faltando.items()]
 
     return "\n".join(linhas), correcoes
+
+
+def _valor_enum_provavel(errado: str, validos: list):
+    por_prefixo = [v for v in validos if v.startswith(errado)]
+    if len(por_prefixo) == 1:
+        return por_prefixo[0]
+    if por_prefixo:
+        return None
+    parecidos = difflib.get_close_matches(errado, validos, n=2, cutoff=CUTOFF_ENUM_AUTOMATICO)
+    if len(parecidos) == 1 or (len(parecidos) == 2 and
+            difflib.SequenceMatcher(None, errado, parecidos[0]).ratio()
+            > difflib.SequenceMatcher(None, errado, parecidos[1]).ratio()):
+        return parecidos[0]
+    return None
+
+
+def _corrigir_enums_automaticamente(codigo: str, enum_index: dict) -> tuple:
+    if not enum_index:
+        return codigo, []
+    correcoes = []
+    for enum, errado in dict.fromkeys(find_enum_value_uses(codigo, enum_index)):
+        validos = [v for v, _ in enum_index[enum]]
+        if errado in validos:
+            continue
+        certo = _valor_enum_provavel(errado, validos)
+        if certo:
+            padrao = re.compile(r'(?<![\w:])(' + re.escape(enum) + r'\s*::\s*)' + re.escape(errado) + r'\b')
+            codigo, n = padrao.subn(r'\g<1>' + certo, codigo)
+            if n:
+                correcoes.append(f"{enum}::{errado} → {enum}::{certo}")
+    return codigo, correcoes

@@ -136,7 +136,8 @@ class TestRespostaFinalDoAgente(unittest.TestCase):
     def test_resultado_tem_as_chaves_do_pipeline_rag(self):
         r = self._gerar(CODIGO_CORRETO)
         esperadas = {"resposta", "valido", "alucinacoes", "erros_aridade", "erros_semanticos",
-                     "includes", "includes_por_classe", "metodos_suspeitos", "compilacao",
+                     "includes", "includes_por_classe", "metodos_suspeitos", "enums_invalidos",
+                     "compilacao",
                      "classes_legado", "classes_indisponiveis", "fontes_nao_api",
                      "correcoes_automaticas", "fontes", "tentativas"}
         self.assertEqual(set(r), esperadas)

@@ -7,7 +7,7 @@ repetidas em app.py, pipeline/__init__.py:main() e eval_benchmark.py.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -32,6 +32,8 @@ class PipelineContext:
     legacy_classes: set
     system_base: str
 
+    enum_values_index: dict = field(default_factory=dict)
+
     @classmethod
     def load(cls) -> PipelineContext:
         """Factory que carrega tudo de uma vez — substitui o bloco de
@@ -41,6 +43,7 @@ class PipelineContext:
             _carregar_bancos,
             _carregar_class_header_index,
             _carregar_class_methods_index,
+            _carregar_enum_values_index,
             _carregar_collisions,
             _carregar_headers_whitelist,
             _carregar_legacy_classes,
@@ -75,6 +78,7 @@ class PipelineContext:
             renames=_carregar_renames(),
             legacy_classes=_carregar_legacy_classes(),
             system_base=_carregar_system_prompt(),
+            enum_values_index=_carregar_enum_values_index(),
         )
         print("Pronto.\n")
         return ctx

@@ -63,6 +63,9 @@ def _rodape(resultado: dict) -> str:
         if resultado["metodos_suspeitos"]:
             linhas.append("⚠️ **Methods not found**: " + ", ".join(
                 f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]))
+        if resultado.get("enums_invalidos"):
+            linhas.append("⚠️ **Invalid enum values**: " + ", ".join(
+                f"`{k}`" for k in resultado["enums_invalidos"]))
         # Erro de compilador é o único que a checagem de nomes não pega (método
         # de outra classe, assinatura errada) — vale mostrar a mensagem crua,
         # que diz exatamente onde está o problema
