@@ -1,11 +1,19 @@
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 from .agent_tools import obter_todas_ferramentas
-from .compilation import _compilar_codigo
+from . import _recursos_validacao, _resultado_de, _verificar_resposta
 from .config import OLLAMA_MODEL, TEMPERATURE, NUM_CTX
 from .context import PipelineContext
 from .prompt import _formatar_contexto
 from .retrieval import _recuperar_contexto
+
+def _resultado_sem_verificacao(resposta: str, fontes: set) -> dict:
+    v = {"resposta": resposta, "alucinacoes": [], "erros_aridade": [], "erros_semanticos": [],
+         "includes": {}, "includes_por_classe": {}, "metodos_suspeitos": [],
+         "compilacao": {"status": "nao_executada", "erros": [], "ignorados": 0},
+         "classes_legado": [], "classes_indisponiveis": {}, "correcoes_automaticas": []}
+    return _resultado_de(v, False, fontes, 1)
+
 
 def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = None, on_evento=None) -> dict:
     llm = ctx.llm
@@ -20,14 +28,9 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         # Validação simples se o modelo suporta
         llm.bind_tools(tools)
     except Exception:
-        return {
-            "resposta": "⚠️ Error: the current model does not support Tool Calling (Function Calling). Switch to Gemini to use the Agent.",
-            "valido": False, "alucinacoes": [], "erros_aridade": [], "erros_semanticos": [],
-            "includes": {}, "includes_por_classe": {}, "metodos_suspeitos": [], 
-            "compilacao": {"status": "erros", "erros": []}, "classes_legado": [], 
-            "classes_indisponiveis": {}, "fontes_nao_api": [], "correcoes_automaticas": [], 
-            "fontes": set(), "tentativas": 1
-        }
+        return _resultado_sem_verificacao(
+            "⚠️ Error: the current model does not support Tool Calling (Function Calling). "
+            "Switch to Gemini to use the Agent.", set())
 
     if on_evento:
         on_evento("status", "🔎 Retrieving NeoPZ context for the agent...")
@@ -83,6 +86,9 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         # O usuário que acionou do terminal verá as ferramentas rodando!
         res = agent_executor.invoke({"input": pergunta, "chat_history": chat_history})
         resposta_final = res["output"]
+        if isinstance(resposta_final, list):
+            resposta_final = "".join(p.get("text", "") if isinstance(p, dict) else str(p)
+                                     for p in resposta_final)
     except Exception as e:
         houve_erro = True
         resposta_final = f"⚠️ Internal error in the agent reasoning: {e}"
@@ -90,25 +96,8 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
     if on_evento:
         on_evento("status", "🏁 The Agent finished and produced its final answer.")
     
-    compilacao = ({"status": "nao_executada", "erros": [], "ignorados": 0} if houve_erro
-                  else _compilar_codigo(resposta_final))
-    valido = not houve_erro and compilacao["status"] != "erros"
-    
-    # Mockando a estrutura que o frontend espera
-    return {
-        "resposta": resposta_final,
-        "valido": valido,
-        "compilacao": compilacao,
-        "alucinacoes": [],
-        "erros_aridade": [],
-        "erros_semanticos": [],
-        "includes": {},
-        "includes_por_classe": {},
-        "metodos_suspeitos": [],
-        "classes_legado": [],
-        "classes_indisponiveis": {},
-        "fontes_nao_api": [],
-        "correcoes_automaticas": [],
-        "fontes": fontes_usadas,
-        "tentativas": 1,
-    }
+    if houve_erro:
+        return _resultado_sem_verificacao(resposta_final, fontes_usadas)
+
+    v = _verificar_resposta(resposta_final, **_recursos_validacao(ctx), on_evento=on_evento)
+    return _resultado_de(v, v["valido"], fontes_usadas, 1)

@@ -167,6 +167,160 @@ def _emitir(on_evento, tipo: str, texto: str):
         pass
 
 
+def _recursos_validacao(ctx) -> dict:
+    class_header_index = ctx.class_header_index or {}
+    return dict(
+        whitelist=ctx.whitelist,
+        headers_whitelist=ctx.headers_whitelist,
+        methods_whitelist=ctx.methods_whitelist or set(),
+        class_header_index=class_header_index,
+        class_methods_index=ctx.class_methods_index or {},
+        collisions=ctx.collisions or {},
+        renames=ctx.renames or {},
+        legacy_classes=ctx.legacy_classes or set(),
+        destinos=_whitelist_utilizavel(ctx.whitelist, class_header_index),
+    )
+
+
+def _verificar_resposta(
+    resposta: str, *, whitelist, headers_whitelist, methods_whitelist,
+    class_header_index, class_methods_index, collisions, renames,
+    legacy_classes, destinos, on_evento=None,
+) -> dict:
+    tem_codigo = _resposta_contem_codigo(resposta)
+    correcoes_automaticas = []
+    if tem_codigo:
+        resposta, correcoes_classes = _corrigir_classes_automaticamente(
+            resposta, whitelist, renames, destinos=destinos)
+        correcoes_automaticas.extend(correcoes_classes)
+
+        metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
+        resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
+            resposta, metodos_suspeitos_pre_correcao, class_methods_index,
+        )
+        correcoes_automaticas.extend(correcoes_metodos)
+
+        resposta, correcoes_includes = _corrigir_includes_automaticamente(
+            resposta, class_header_index, collisions, headers_whitelist,
+        )
+        correcoes_automaticas.extend(correcoes_includes)
+
+        if correcoes_automaticas:
+            print(f"  🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
+            _emitir(on_evento, "status", f"🔧 Automatically fixed: {', '.join(correcoes_automaticas)}")
+
+    classes_alucinadas = _validar_codigo(resposta, whitelist)
+    if tem_codigo:
+        includes_errados = _validar_includes(resposta, headers_whitelist)
+        includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
+        metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
+        erros_semanticos = validar_semantica(resposta)
+    else:
+        includes_errados = {}
+        includes_por_classe = {}
+        metodos_suspeitos = []
+        erros_aridade = []
+        erros_semanticos = []
+
+    classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
+
+    classes_indisponiveis = (_classes_indisponiveis(resposta, class_header_index)
+                             if tem_codigo else {})
+
+    nomes_ok = not (classes_alucinadas or includes_errados
+                    or includes_por_classe or metodos_suspeitos
+                    or erros_aridade or erros_semanticos)
+
+    compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
+    if nomes_ok and tem_codigo and classes_indisponiveis:
+        fora = "; ".join(f"{c} ({m})" for c, m in sorted(classes_indisponiveis.items()))
+        compilacao = {"status": "indisponivel", "erros": [], "ignorados": 0,
+                      "motivo": f"code uses a class outside this installation: {fora}"}
+        print(f"  ⚠️  Compilação pulada — {compilacao['motivo']}")
+        _emitir(on_evento, "status", f"⚠️ Compilation skipped — {compilacao['motivo']}")
+    elif nomes_ok and tem_codigo:
+        _emitir(on_evento, "status", "🛠️ Compiling the generated code...")
+        compilacao = _compilar_codigo(resposta)
+        if compilacao["status"] == "erros":
+            print(f"  ❌ O compilador recusou o código: {'; '.join(compilacao['erros'])}")
+            _emitir(on_evento, "status",
+                    "❌ The compiler rejected the code: " + "; ".join(compilacao["erros"]))
+        elif compilacao["status"] == "inconclusivo":
+            print(f"  ℹ️  Compilação inconclusiva — {compilacao['ignorados']} diagnóstico(s) "
+                  "tratados como artefato do recorte, nenhum acusa API inexistente")
+        elif compilacao["status"] == "timeout":
+            print(f"  ⚠️  Compilação estourou {TIMEOUT_COMPILACAO}s — ignorada")
+
+    valido = nomes_ok and compilacao["status"] != "erros"
+    if valido and compilacao["status"] == "ok":
+        print("  ✅ Compilado — o g++ aceitou o código: classes, métodos e assinaturas "
+              "existem de verdade (o resultado físico continua não verificado)")
+    elif valido:
+        print("  ✅ Nomes verificados — classes, headers e métodos existem no NeoPZ "
+              "(semântica e assinaturas não são checadas)")
+
+    if classes_alucinadas:
+        print(f"  ⚠️  Classes não encontradas: {', '.join(classes_alucinadas)}")
+    if includes_errados:
+        print(f"  ⚠️  Headers não encontrados: {', '.join(includes_errados.keys())}")
+    if includes_por_classe:
+        print(f"  ⚠️  Header errado/faltando para classe: {includes_por_classe}")
+    if metodos_suspeitos:
+        print(f"  ⚠️  Métodos não encontrados: {metodos_suspeitos}")
+    for erro in erros_aridade:
+        print(f"  ⚠️  Erro de Aridade: {erro}")
+    for erro in erros_semanticos:
+        print(f"  ⚠️  Erro Semântico: {erro}")
+
+    return {
+        "resposta":              resposta,
+        "tem_codigo":            tem_codigo,
+        "nomes_ok":              nomes_ok,
+        "valido":                valido,
+        "alucinacoes":           classes_alucinadas or [],
+        "erros_aridade":         erros_aridade or [],
+        "erros_semanticos":      erros_semanticos or [],
+        "includes":              includes_errados or {},
+        "includes_por_classe":   includes_por_classe or {},
+        "metodos_suspeitos":     metodos_suspeitos or [],
+        "compilacao":            compilacao,
+        "classes_legado":        classes_legado_usadas,
+        "classes_indisponiveis": classes_indisponiveis,
+        "correcoes_automaticas": correcoes_automaticas,
+    }
+
+
+def _descrever_problemas(v: dict) -> list:
+    problemas = []
+    if v["alucinacoes"]:
+        problemas.append("Classes that do not exist in NeoPZ: " + ", ".join(v["alucinacoes"]))
+    for inc, sugestoes in v["includes"].items():
+        dica = f" (did you mean: {', '.join(sugestoes)})" if sugestoes else ""
+        problemas.append(f"Header that does not exist in NeoPZ: {inc}{dica}")
+    for classe, inc in v["includes_por_classe"].items():
+        problemas.append(f'Wrong or missing header for {classe}: use #include "{inc}"')
+    if v["metodos_suspeitos"]:
+        problemas.append("Methods not found in NeoPZ: " + ", ".join(
+            f"{c}::{m}" for c, m in v["metodos_suspeitos"]))
+    problemas.extend(f"Signature error (arity): {e}" for e in v["erros_aridade"])
+    problemas.extend(f"Domain rule violated: {e}" for e in v["erros_semanticos"])
+    problemas.extend(f"Compiler error: {e}" for e in v["compilacao"]["erros"])
+    return problemas
+
+
+def _resultado_de(v: dict, valido: bool, fontes, tentativas: int) -> dict:
+    return {
+        **{k: v[k] for k in ("resposta", "alucinacoes", "erros_aridade", "erros_semanticos",
+                             "includes", "includes_por_classe", "metodos_suspeitos",
+                             "compilacao", "classes_legado", "classes_indisponiveis",
+                             "correcoes_automaticas")},
+        "valido":         valido,
+        "fontes_nao_api": sorted(f for f in fontes if _fora_da_api(f) == "teste/benchmark"),
+        "fontes":         set(fontes),
+        "tentativas":     tentativas,
+    }
+
+
 def gerar_codigo(
     pergunta: str,
     ctx: PipelineContext = None,
@@ -201,14 +355,16 @@ def gerar_codigo(
         legacy_classes     = ctx.legacy_classes
         system_base        = ctx.system_base
 
-    class_header_index = class_header_index or {}
-    collisions = collisions or {}
-    methods_whitelist = methods_whitelist or set()
-    class_methods_index = class_methods_index or {}
-    renames = renames or {}
-    legacy_classes = legacy_classes or set()
-
-    whitelist_destino = _whitelist_utilizavel(whitelist, class_header_index)
+    recursos = _recursos_validacao(PipelineContext(
+        llm=llm, headers_db=headers_db, examples_db=examples_db, wiki_db=wiki_db,
+        whitelist=whitelist, headers_whitelist=headers_whitelist,
+        methods_whitelist=methods_whitelist, class_header_index=class_header_index,
+        class_methods_index=class_methods_index, collisions=collisions,
+        renames=renames, legacy_classes=legacy_classes, system_base=system_base,
+    ))
+    methods_whitelist = recursos["methods_whitelist"]
+    renames = recursos["renames"]
+    whitelist_destino = recursos["destinos"]
 
     classes_alucinadas = None
     includes_errados = None
@@ -216,33 +372,9 @@ def gerar_codigo(
     metodos_suspeitos = None
     erros_compilacao = None
     erros_semanticos = None
-    compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
-    correcoes_automaticas = []
-    classes_legado_usadas = []
-    classes_indisponiveis = {}
     nomes_ok = False
 
     melhor = None
-
-    def _resultado(valido: bool) -> dict:
-        return {
-            "resposta":             resposta,
-            "valido":               valido,
-            "alucinacoes":          classes_alucinadas or [],
-            "erros_aridade":        erros_aridade or [],
-            "erros_semanticos":     erros_semanticos or [],
-            "includes":             includes_errados or {},
-            "includes_por_classe":  includes_por_classe or {},
-            "metodos_suspeitos":    metodos_suspeitos or [],
-            "compilacao":           compilacao,
-            "classes_legado":       classes_legado_usadas,
-            "classes_indisponiveis": classes_indisponiveis,
-            "fontes_nao_api":       sorted(f for f in fontes
-                                           if _fora_da_api(f) == "teste/benchmark"),
-            "correcoes_automaticas": correcoes_automaticas,
-            "fontes":               set(fontes),
-            "tentativas":           tentativa,
-        }
 
     consulta = pergunta
     if historico:
@@ -310,98 +442,21 @@ def gerar_codigo(
                 raise
         llm_cache.salvar(llm, prompt, resposta)
 
-        tem_codigo = _resposta_contem_codigo(resposta)
-        correcoes_automaticas = []
-        if tem_codigo:
-            resposta, correcoes_classes = _corrigir_classes_automaticamente(
-                resposta, whitelist, renames, destinos=whitelist_destino)
-            correcoes_automaticas.extend(correcoes_classes)
+        v = _verificar_resposta(resposta, **recursos, on_evento=on_evento)
+        resposta = v["resposta"]
+        nomes_ok = v["nomes_ok"]
+        classes_alucinadas = v["alucinacoes"]
+        includes_errados = v["includes"]
+        includes_por_classe = v["includes_por_classe"]
+        metodos_suspeitos = v["metodos_suspeitos"]
+        erros_semanticos = v["erros_semanticos"]
+        erros_compilacao = v["compilacao"]["erros"] or None
 
-            metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
-            resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
-                resposta, metodos_suspeitos_pre_correcao, class_methods_index,
-            )
-            correcoes_automaticas.extend(correcoes_metodos)
-
-            resposta, correcoes_includes = _corrigir_includes_automaticamente(
-                resposta, class_header_index, collisions, headers_whitelist,
-            )
-            correcoes_automaticas.extend(correcoes_includes)
-
-            if correcoes_automaticas:
-                print(f"  🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
-                _emitir(on_evento, "status", f"🔧 Automatically fixed: {', '.join(correcoes_automaticas)}")
-
-        classes_alucinadas = _validar_codigo(resposta, whitelist)
-        if tem_codigo:
-            includes_errados = _validar_includes(resposta, headers_whitelist)
-            includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
-            metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
-            erros_semanticos = validar_semantica(resposta)
-        else:
-            includes_errados = {}
-            includes_por_classe = {}
-            metodos_suspeitos = []
-            erros_aridade = []
-            erros_semanticos = []
-
-        classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
-
-        classes_indisponiveis = (_classes_indisponiveis(resposta, class_header_index)
-                                 if tem_codigo else {})
-
-        nomes_ok = not (classes_alucinadas or includes_errados
-                        or includes_por_classe or metodos_suspeitos
-                        or erros_aridade or erros_semanticos)
-
-        compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
-        erros_compilacao = None
-        if nomes_ok and tem_codigo and classes_indisponiveis:
-            fora = "; ".join(f"{c} ({m})" for c, m in sorted(classes_indisponiveis.items()))
-            compilacao = {"status": "indisponivel", "erros": [], "ignorados": 0,
-                          "motivo": f"code uses a class outside this installation: {fora}"}
-            print(f"  ⚠️  Compilação pulada — {compilacao['motivo']}")
-            _emitir(on_evento, "status", f"⚠️ Compilation skipped — {compilacao['motivo']}")
-        elif nomes_ok and tem_codigo:
-            _emitir(on_evento, "status", "🛠️ Compiling the generated code...")
-            compilacao = _compilar_codigo(resposta)
-            if compilacao["status"] == "erros":
-                erros_compilacao = compilacao["erros"]
-                print(f"  ❌ O compilador recusou o código: {'; '.join(erros_compilacao)}")
-                _emitir(on_evento, "status",
-                        "❌ The compiler rejected the code: " + "; ".join(erros_compilacao))
-            elif compilacao["status"] == "inconclusivo":
-                print(f"  ℹ️  Compilação inconclusiva — {compilacao['ignorados']} diagnóstico(s) "
-                      "tratados como artefato do recorte, nenhum acusa API inexistente")
-            elif compilacao["status"] == "timeout":
-                print(f"  ⚠️  Compilação estourou {TIMEOUT_COMPILACAO}s — ignorada")
-
-        if nomes_ok and not erros_compilacao:
-            if compilacao["status"] == "ok":
-                print("  ✅ Compilado — o g++ aceitou o código: classes, métodos e assinaturas "
-                      "existem de verdade (o resultado físico continua não verificado)")
-            else:
-                print("  ✅ Nomes verificados — classes, headers e métodos existem no NeoPZ "
-                      "(semântica e assinaturas não são checadas)")
-            return _resultado(True)
+        if v["valido"]:
+            return _resultado_de(v, True, fontes, tentativa)
 
         if nomes_ok and melhor is None:
-            melhor = _resultado(False)
-
-        if classes_alucinadas:
-            print(f"  ⚠️  Classes não encontradas: {', '.join(classes_alucinadas)}")
-        if includes_errados:
-            print(f"  ⚠️  Headers não encontrados: {', '.join(includes_errados.keys())}")
-        if includes_por_classe:
-            print(f"  ⚠️  Header errado/faltando para classe: {includes_por_classe}")
-        if metodos_suspeitos:
-            print(f"  ⚠️  Métodos não encontrados: {metodos_suspeitos}")
-        if erros_aridade:
-            for erro in erros_aridade:
-                print(f"  ⚠️  Erro de Aridade: {erro}")
-        if erros_semanticos:
-            for erro in erros_semanticos:
-                print(f"  ⚠️  Erro Semântico: {erro}")
+            melhor = _resultado_de(v, False, fontes, tentativa)
 
         if tentativa >= MAX_RETRIES + 1:
             print("  ⚠️  Limite de tentativas atingido.")
@@ -446,7 +501,7 @@ def gerar_codigo(
     if melhor is not None and not nomes_ok:
         print("  ↩️  Devolvendo a melhor tentativa (nomes limpos, compilação reprovada).")
         return melhor
-    return _resultado(False)
+    return _resultado_de(v, False, fontes, tentativa)
 
 
 def obter_llm():

@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 from typing import Annotated
 from .context import PipelineContext
-from .compilation import _compilar_codigo
+from . import _descrever_problemas, _recursos_validacao, _verificar_resposta
 
 def obter_todas_ferramentas(ctx: PipelineContext):
 
@@ -40,19 +40,28 @@ def obter_todas_ferramentas(ctx: PipelineContext):
 
     @tool
     def test_compilation(cpp_code: Annotated[str, "Complete C++ code snippet to be tested by the GCC compiler"]) -> str:
-        """Runs a code snippet through the real g++ compiler using the NeoPZ environment.
-        Returns 'SUCCESS' if the code compiles correctly, or the list of COMPILER ERRORS.
+        """Validates a code snippet against NeoPZ: checks that classes, headers and methods exist,
+        checks NeoPZ domain rules (e.g. correct constructors and solvers) and runs it through the real g++ compiler.
+        Returns 'SUCCESS' if everything passes, or the list of PROBLEMS to fix.
         ALWAYS use this tool to validate your idea BEFORE giving the final answer with the generated code to the user, making sure what you deliver actually works."""
         if "```" not in cpp_code:
             cpp_code = f"```cpp\n{cpp_code}\n```"
-        res = _compilar_codigo(cpp_code)
-        if res["status"] == "ok":
-            return "SUCCESS: the code compiled and the methods/signatures really exist in NeoPZ."
-        elif res["status"] == "erros":
-            erros_str = "\n".join(res["erros"])
-            return f"COMPILATION ERROR. The compiler reported the following errors:\n{erros_str}\nUnderstand the errors, check the class declarations if needed (with get_class_declaration) and try again."
-        else:
-            return f"Warning: {res['status']}. It was not possible to confirm that the code is 100% correct."
+        v = _verificar_resposta(cpp_code, **_recursos_validacao(ctx))
+        corrigido = ""
+        if v["correcoes_automaticas"]:
+            corrigido = ("\nNOTE: the validator applied these automatic fixes; apply them in your final answer too: "
+                         + ", ".join(v["correcoes_automaticas"]))
+        if not v["valido"]:
+            problemas = "\n".join(f"- {p}" for p in _descrever_problemas(v))
+            return (f"VALIDATION FAILED. Problems found:\n{problemas}{corrigido}\n"
+                    "Understand the problems, check the class declarations if needed "
+                    "(with get_class_declaration) and try again.")
+        if v["compilacao"]["status"] == "ok":
+            return ("SUCCESS: the code compiled, the methods/signatures really exist in NeoPZ "
+                    f"and no domain rule was violated.{corrigido}")
+        return (f"Names and domain rules verified, but compilation was not conclusive "
+                f"({v['compilacao']['status']}). It was not possible to confirm that the code "
+                f"is 100% correct.{corrigido}")
 
     return [
         get_class_declaration,
