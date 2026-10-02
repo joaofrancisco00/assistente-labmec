@@ -61,7 +61,7 @@ uv run indexer_wiki.py   # indexa a wiki curada (receitas e conceitos)
 **Terminal** (modo direto):
 
 ```bash
-uv run pipeline.py
+uv run python -m pipeline
 ```
 
 **Interface web**:
@@ -90,9 +90,9 @@ Toda resposta vem com um selo no rodapé:
 
 | Caminho | O que é |
 |---|---|
-| `pipeline.py` | Pipeline RAG: recuperação → geração → validação → correção → retry |
+| `pipeline/` | Pipeline RAG: recuperação → geração → validação → correção → retry (`__init__.py`), modo agente (`agent.py`, `agent_tools.py`), compilação, regras semânticas (`rules/semantic.yaml`) |
 | `app.py` | Interface web (Gradio) |
-| `cpp_parser.py` | Parser heurístico dos headers C++ (whitelists, chunks) |
+| `pipeline/cpp_parser.py` | Parser heurístico dos headers C++ (whitelists, chunks) |
 | `indexer.py` / `indexer_wiki.py` | Indexação (código NeoPZ / wiki curada) |
 | `renames.json` | Mapa curado classe antiga → atual (editável à mão) |
 | `wiki_neopz/` | Wiki curada (receitas, catálogo de materiais, conceitos) |

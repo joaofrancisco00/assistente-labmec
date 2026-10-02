@@ -1,8 +1,8 @@
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate
 from .agent_tools import obter_todas_ferramentas
-from . import _recursos_validacao, _resultado_de, _verificar_resposta
-from .config import OLLAMA_MODEL, TEMPERATURE, NUM_CTX
+from . import _emitir, _recursos_validacao, _resultado_de, _verificar_resposta, gerar_codigo
+from .config import OLLAMA_MODEL
 from .context import PipelineContext
 from .prompt import _formatar_contexto
 from .retrieval import _recuperar_contexto
@@ -15,11 +15,22 @@ def _resultado_sem_verificacao(resposta: str, fontes: set) -> dict:
     return _resultado_de(v, False, fontes, 1)
 
 
+_MODELOS_LOCAIS = ("OllamaLLM", "ChatOllama", "Ollama")
+
+
+def _modelo_local(llm) -> bool:
+    return type(llm).__name__ in _MODELOS_LOCAIS
+
+
 def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = None, on_evento=None) -> dict:
     llm = ctx.llm
-    if not hasattr(llm, "bind_tools") and type(llm).__name__ == "OllamaLLM":
-        from langchain_ollama import ChatOllama
-        llm = ChatOllama(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+    if _modelo_local(llm):
+        print(f"  ℹ️  Modo agente indisponível com o modelo local ({OLLAMA_MODEL}): "
+              "ele não chama ferramentas — usando o pipeline RAG")
+        _emitir(on_evento, "status",
+                "ℹ️ The Agent needs Gemini (the local model does not call tools) — "
+                "answering with the standard pipeline instead.")
+        return gerar_codigo(pergunta, ctx, historico=historico, on_evento=on_evento)
     if hasattr(llm, "max_retries"):
         llm = llm.model_copy(update={"max_retries": 4})
     

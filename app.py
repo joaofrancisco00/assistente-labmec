@@ -239,7 +239,7 @@ demo = gr.ChatInterface(
         "What is the TPZGeoMesh class and what is it for?",
     ],
     additional_inputs=[
-        gr.Checkbox(label="Use Autonomous Agent (the LLM searches and compiles the code on its own before answering)", value=False)
+        gr.Checkbox(label="Use Autonomous Agent (the LLM searches and compiles the code on its own before answering; requires Gemini — with the local model the standard pipeline is used)", value=False)
     ],
 )
 

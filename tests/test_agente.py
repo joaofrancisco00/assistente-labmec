@@ -147,5 +147,28 @@ class TestRespostaFinalDoAgente(unittest.TestCase):
         self.assertTrue(r["valido"])
 
 
+class TestModeloLocalUsaORag(unittest.TestCase):
+    def test_ollama_cai_para_o_pipeline_rag(self):
+        ctx = _ctx()
+        ctx.llm = type("ChatOllama", (_LLMComTools,), {})()
+        eventos = []
+        esperado = {"resposta": "via RAG"}
+        with patch.object(agent, "gerar_codigo", return_value=esperado) as rag, \
+             patch.object(agent, "AgentExecutor") as executor, \
+             redirect_stdout(io.StringIO()):
+            r = agent.gerar_codigo_agente("2D elasticity", ctx, historico=[("a", "b")],
+                                          on_evento=lambda t, x: eventos.append((t, x)))
+        self.assertIs(r, esperado)
+        rag.assert_called_once()
+        self.assertEqual(rag.call_args.kwargs["historico"], [("a", "b")])
+        executor.assert_not_called()
+        self.assertTrue(any("Gemini" in x for _, x in eventos))
+
+    def test_gemini_continua_no_agente(self):
+        with patch.object(agent, "gerar_codigo") as rag:
+            TestRespostaFinalDoAgente()._gerar(CODIGO_CORRETO)
+        rag.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
