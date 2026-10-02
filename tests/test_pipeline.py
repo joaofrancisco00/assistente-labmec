@@ -739,5 +739,48 @@ class TestClassesCitadasEmErros(unittest.TestCase):
         self.assertEqual(pipeline._classes_citadas_em_erros(erros, {"TPZDarcyFlow"}), set())
 
 
+class TestReforcoPorNomeCitadoEmErro(unittest.TestCase):
+    ERRO_ENUM = ["'EHexa' is not a member of 'MMeshType'"]
+    DECL_ENUM = "enum class MMeshType\n{\n    ETriangular, EQuadrilateral, EHexahedral\n};"
+
+    class _DBComHeaders(_DBFalso):
+        def __init__(self, docs):
+            from langchain_core.documents import Document
+            self.docs = [Document(page_content=t, metadata={"source": f, "classe": ""})
+                         for f, t in docs]
+            self.consultas = []
+
+        def similarity_search(self, consulta, k=4, **kw):
+            self.consultas.append(consulta)
+            return self.docs[:k]
+
+    def test_nomes_fora_do_padrao_tpz_saem_do_erro(self):
+        nomes = pipeline._nomes_citados_em_erros(
+            self.ERRO_ENUM + ["'class TPZVec<int>' has no member named 'Push'"])
+        self.assertIn("MMeshType", nomes)
+        self.assertIn("EHexa", nomes)
+        self.assertNotIn("TPZVec", nomes)
+
+    def test_so_entra_doc_que_declara_o_nome(self):
+        db = self._DBComHeaders([("Pre/uso.h", "void f(MMeshType t);"),
+                                 ("Pre/MMeshType.h", self.DECL_ENUM)])
+        docs = pipeline._buscar_declaracoes_por_nome(db, {"MMeshType", "EHexa"}, limite=2)
+        self.assertEqual([d.metadata["source"] for d in docs], ["Pre/MMeshType.h"])
+
+    def test_declaracao_do_enum_chega_ao_prompt_do_retry(self):
+        llm = _LLMFalso("```cpp\nint main() { auto t = MMeshType::EHexa; return 0; }\n```\n")
+        db = self._DBComHeaders([("Pre/MMeshType.h", self.DECL_ENUM)])
+        with patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "erros", "erros": self.ERRO_ENUM, "ignorados": 0}), \
+             patch.object(pipeline, "validar_semantica", return_value=[]), \
+             patch.object(pipeline.time, "sleep"), \
+             redirect_stdout(io.StringIO()):
+            pipeline.gerar_codigo("3D mesh", llm=llm, headers_db=db, examples_db=_DBFalso(),
+                                  whitelist={"TPZGeoMesh"}, headers_whitelist=set(),
+                                  system_base="sistema")
+        self.assertNotIn("EHexahedral", llm.prompts[0])
+        self.assertIn("EHexahedral", llm.prompts[1])
+
+
 if __name__ == "__main__":
     unittest.main()

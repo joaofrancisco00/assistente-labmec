@@ -2,6 +2,7 @@ from langchain_core.tools import tool
 from typing import Annotated
 from .context import PipelineContext
 from . import _descrever_problemas, _recursos_validacao, _verificar_resposta
+from .retrieval import _buscar_declaracoes_por_nome
 
 def obter_todas_ferramentas(ctx: PipelineContext):
 
@@ -13,6 +14,8 @@ def obter_todas_ferramentas(ctx: PipelineContext):
             return "Error: headers database unavailable."
 
         docs = ctx.headers_db.similarity_search(class_name, k=3, filter={"classe": class_name})
+        if not docs:
+            docs = _buscar_declaracoes_por_nome(ctx.headers_db, {class_name}, limite=1)
         if not docs:
             docs = ctx.headers_db.similarity_search(class_name, k=3)
 

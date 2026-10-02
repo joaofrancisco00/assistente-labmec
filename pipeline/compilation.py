@@ -165,3 +165,16 @@ def _classes_citadas_em_erros(erros: list, whitelist: set) -> set:
     for msg in erros:
         citadas.update(_CLASSE_EM_DIAGNOSTICO_RE.findall(msg))
     return {c for c in citadas if c in whitelist} if whitelist else citadas
+
+
+_TRECHO_ENTRE_ASPAS_RE = re.compile(r"'([^']+)'")
+_NOME_TIPO_RE = re.compile(r"\b[A-Z][A-Za-z0-9_]{2,}\b")
+
+
+def _nomes_citados_em_erros(erros: list) -> set:
+    nomes = set()
+    for msg in erros:
+        for trecho in _TRECHO_ENTRE_ASPAS_RE.findall(msg):
+            nomes.update(n for n in _NOME_TIPO_RE.findall(trecho)
+                         if not n.startswith("TPZ"))
+    return nomes

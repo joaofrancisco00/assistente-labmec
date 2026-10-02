@@ -125,6 +125,20 @@ def _buscar_declaracoes_por_classe(headers_db, pergunta: str, classes: set, limi
         docs.extend(hits)
     return docs
 
+def _buscar_declaracoes_por_nome(headers_db, nomes: set, limite: int) -> list:
+    docs = []
+    for nome in sorted(nomes):
+        if len(docs) >= limite:
+            break
+        declaracao = re.compile(
+            rf"\b(?:enum(?:\s+class)?|class|struct|namespace|typedef[^;]*|using)\s+{re.escape(nome)}\b")
+        try:
+            hits = headers_db.similarity_search(nome, k=5)
+        except Exception:
+            hits = []
+        docs.extend(next(([d] for d in hits if declaracao.search(d.page_content)), []))
+    return docs
+
 def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
                         explicativa: bool = None) -> tuple:
     classes_citadas = find_tpz_classes_in_code(pergunta)

@@ -66,6 +66,7 @@ from .retrieval import (
     _reservar_vagas_conceitos,
     _dedup_docs,
     _buscar_declaracoes_por_classe,
+    _buscar_declaracoes_por_nome,
     _recuperar_contexto,
 )
 
@@ -99,6 +100,7 @@ from .compilation import (
     _include_flags,
     _compilar_codigo,
     _classes_citadas_em_erros,
+    _nomes_citados_em_erros,
 )
 
 from .prompt import (
@@ -482,6 +484,8 @@ def gerar_codigo(
         classes_reforco -= {d.metadata.get("classe", "") for d in h_docs}
 
         extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)
+        extras += _buscar_declaracoes_por_nome(
+            headers_db, _nomes_citados_em_erros(erros_compilacao or []), limite=2)
         extras = _despriorizar_legado(_dedup_docs(extras + docs_semanticos))
         ja_presentes = {d.page_content for d in h_docs}
         extras = [d for d in extras if d.page_content not in ja_presentes]
