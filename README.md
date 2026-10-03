@@ -136,6 +136,7 @@ uv run eval_benchmark.py                        # 12 casos, pipeline RAG (~20 mi
 uv run eval_benchmark.py --agente               # mesmos casos, modo agente
 uv run eval_benchmark.py --grupo sem_receita    # só os casos sem receita
 uv run eval_benchmark.py --casos snippet_vtk    # casos específicos (poupa a cota do Gemini)
+uv run eval_benchmark.py --executar             # também executa os programas completos
 ```
 
 Acusa regressão silenciosa se a nota cair. O placar sai separado em dois
@@ -186,6 +187,22 @@ export NEOPZ_CXX=/caminho/do/compilador
 
 Sem NeoPZ instalado, a checagem fica desligada em silêncio: o selo volta a
 ser `✅ Nomes verificados`. **Falta de compilador nunca reprova uma resposta.**
+
+### Execução do programa gerado (opcional)
+
+Com `EXECUTAR_CODIGO=1`, quando a resposta é um programa completo (um único
+bloco com `main`) e compila, o pipeline também o **linka contra a `libpz` e
+executa** numa pasta temporária, com timeout. O rodapé mostra `▶️ Executed`
+(com os arquivos gravados, ex.: o `.vtk`) ou o crash / código de saída.
+
+```bash
+EXECUTAR_CODIGO=1 caffeinate -i uv run app.py
+```
+
+Fica **desligado por padrão**: liga a execução de código gerado pelo modelo
+na máquina do servidor. Respostas com programa completo também trazem um
+`CMakeLists.txt` pronto (`find_package(NeoPZ)` + `NeoPZ::pz`) para o aluno
+compilar na própria máquina.
 
 ## Solução de problemas
 

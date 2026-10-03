@@ -115,6 +115,7 @@ from .prompt import (
 )
 
 from .semantic_check import validar_semantica
+from .execucao import _executar_codigo, _execucao_ligada, _instrucoes_cmake
 
 from . import (
     config,
@@ -153,6 +154,7 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
             "metodos_suspeitos":     [f"{c}::{m}" for c, m in resultado["metodos_suspeitos"]],
             "enums_invalidos":       sorted(resultado.get("enums_invalidos", {})),
             "compilacao":            resultado.get("compilacao", {}).get("status", "nao_executada"),
+            "execucao":              resultado.get("execucao", {}).get("status", "nao_executada"),
             "erros_compilacao":      resultado.get("compilacao", {}).get("erros", []),
             "classes_legado":        resultado.get("classes_legado", []),
             "classes_indisponiveis": resultado.get("classes_indisponiveis", {}),
@@ -264,6 +266,13 @@ def _verificar_resposta(
         elif compilacao["status"] == "timeout":
             print(f"  ⚠️  Compilação estourou {TIMEOUT_COMPILACAO}s — ignorada")
 
+    execucao = {"status": "nao_executada"}
+    if compilacao["status"] == "ok" and _execucao_ligada():
+        _emitir(on_evento, "status", "▶️ Running the generated program...")
+        execucao = _executar_codigo(resposta)
+        print(f"  ▶️  Execução: {execucao['status']}"
+              + (f" — {execucao['erros'][0]}" if execucao.get("erros") else ""))
+
     valido = nomes_ok and compilacao["status"] != "erros"
     if valido and compilacao["status"] == "ok":
         print("  ✅ Compilado — o g++ aceitou o código: classes, métodos e assinaturas "
@@ -300,6 +309,8 @@ def _verificar_resposta(
         "metodos_suspeitos":     metodos_suspeitos or [],
         "enums_invalidos":       enums_invalidos,
         "compilacao":            compilacao,
+        "execucao":              execucao,
+        "cmake":                 _instrucoes_cmake(resposta) if tem_codigo else "",
         "classes_legado":        classes_legado_usadas,
         "classes_indisponiveis": classes_indisponiveis,
         "correcoes_automaticas": correcoes_automaticas,
@@ -330,7 +341,7 @@ def _resultado_de(v: dict, valido: bool, fontes, tentativas: int) -> dict:
     return {
         **{k: v[k] for k in ("resposta", "alucinacoes", "erros_aridade", "erros_semanticos",
                              "includes", "includes_por_classe", "metodos_suspeitos",
-                             "enums_invalidos", "compilacao", "classes_legado", "classes_indisponiveis",
+                             "enums_invalidos", "compilacao", "execucao", "cmake", "classes_legado", "classes_indisponiveis",
                              "correcoes_automaticas")},
         "valido":         valido,
         "fontes_nao_api": sorted(f for f in fontes if _fora_da_api(f) == "teste/benchmark"),
@@ -616,6 +627,13 @@ def main():
             print(f"ℹ️  Test/benchmark sources consulted: {nomes}")
             print(f"   ({'/'.join(_DIRS_NAO_API)} become separate executables, not part of libpz —")
             print("    useful to understand the class, not as a canonical usage example)")
+        execucao = resultado.get("execucao", {}).get("status", "nao_executada")
+        if execucao not in ("nao_executada", "nao_aplicavel"):
+            print(f"▶️  Execution: {execucao}")
+            if resultado["execucao"].get("saida"):
+                print("   " + resultado["execucao"]["saida"].replace("\n", "\n   "))
+        if resultado["valido"] and resultado.get("cmake"):
+            print("\n" + resultado["cmake"] + "\n")
         if resultado["valido"] and resultado["compilacao"]["status"] == "ok":
             print("✅ Compiled: g++ accepted the code — classes, methods and signatures really exist")
             print("   (compiling does NOT verify the physical result — check that the material/formulation fits the problem)")

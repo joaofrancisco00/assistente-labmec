@@ -20,6 +20,7 @@ respostas. Código de saída != 0 se qualquer verificação falhar.
 import argparse
 import datetime
 import json
+import os
 import re
 import sys
 import time
@@ -97,6 +98,10 @@ def _compilou(r: dict) -> bool:
     return r["compilacao"]["status"] == "ok"
 
 
+def _executou(r: dict) -> bool:
+    return r.get("execucao", {}).get("status") == "ok"
+
+
 def _sem_main(resposta: str) -> bool:
     return "int main(" not in resposta
 
@@ -131,6 +136,7 @@ _API_CONDENSACAO = ("CreatedCondensedElements", "CondenseElements",
 CASOS = [
     {
         "nome": "poisson_2d_completo",
+        "programa": True,
         "receita": True,
         "pergunta": ("Create a 2D geometric mesh using TPZGeoMeshTools and then a "
                      "computational mesh with TPZCompMesh to solve a Poisson "
@@ -149,6 +155,7 @@ CASOS = [
     },
     {
         "nome": "elasticidade_2d",
+        "programa": True,
         "receita": True,
         "pergunta": ("Write complete C++ code with NeoPZ to solve a "
                      "2D linear elasticity problem, with all the necessary includes."),
@@ -163,6 +170,7 @@ CASOS = [
     },
     {
         "nome": "darcy_misto_2d",
+        "programa": True,
         "receita": True,
         "pergunta": ("Write complete C++ code with NeoPZ to solve a "
                      "2D Darcy problem in the mixed formulation (flux and pressure), with "
@@ -183,6 +191,7 @@ CASOS = [
         # (espaços combinados) porque o catálogo — único doc que aponta
         # TPZDarcyFlow — era espremido do retrieval pelas receitas.
         "nome": "darcy_h1_2d",
+        "programa": True,
         "receita": True,
         "pergunta": ("Write complete C++ code with NeoPZ to solve a "
                      "2D Darcy flow problem using the H1 approximation space, "
@@ -223,6 +232,7 @@ CASOS = [
     },
     {
         "nome": "poisson_3d_hexaedros",
+        "programa": True,
         "receita": False,
         "pergunta": ("Write complete C++ code with NeoPZ to solve a 3D Poisson problem "
                      "on a unit cube meshed with hexahedra, with all the necessary includes."),
@@ -238,6 +248,7 @@ CASOS = [
     },
     {
         "nome": "refinamento_uniforme",
+        "programa": True,
         "receita": False,
         "pergunta": ("Write complete C++ code with NeoPZ that creates a 2D quadrilateral "
                      "geometric mesh with TPZGeoMeshTools and refines it uniformly twice, "
@@ -313,6 +324,9 @@ def _argumentos():
     parser.add_argument("--grupo", choices=("com_receita", "sem_receita"),
                         help="só os casos com (ou sem) receita equivalente em wiki/flows/")
     parser.add_argument("--casos", help="nomes dos casos separados por vírgula")
+    parser.add_argument("--executar", action="store_true",
+                        help="executa os programas completos (EXECUTAR_CODIGO=1) e "
+                             "acrescenta o check 'executou'")
     args = parser.parse_args()
 
     casos = CASOS
@@ -330,6 +344,10 @@ def _argumentos():
 def main():
     args, casos = _argumentos()
     modo = "agente" if args.agente else "rag"
+    if args.executar:
+        os.environ["EXECUTAR_CODIGO"] = "1"
+        casos = [dict(c, checks={**c["checks"], "executou": _executou}) if c.get("programa") else c
+                 for c in casos]
 
     from pipeline.context import PipelineContext
     ctx = PipelineContext.load()
@@ -366,6 +384,7 @@ def main():
             "tentativas": resultado["tentativas"],
             "valido":     resultado["valido"],
             "compilacao": resultado["compilacao"]["status"],
+            "execucao":   resultado.get("execucao", {}).get("status", "nao_executada"),
             "tempo_s":    round(elapsed, 1),
             "resposta":   resultado["resposta"],
         })
@@ -390,6 +409,7 @@ def main():
         "quando":      datetime.datetime.now().isoformat(timespec="seconds"),
         "modelo":      getattr(llm, "model", "desconhecido"),
         "modo":        modo,
+        "executar":    args.executar,
         "resultado":   f"{ok_total}/{total}",
         "com_receita": "{}/{}".format(*placar[True]),
         "sem_receita": "{}/{}".format(*placar[False]),

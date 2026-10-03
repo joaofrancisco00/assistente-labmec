@@ -137,7 +137,7 @@ class TestRespostaFinalDoAgente(unittest.TestCase):
         r = self._gerar(CODIGO_CORRETO)
         esperadas = {"resposta", "valido", "alucinacoes", "erros_aridade", "erros_semanticos",
                      "includes", "includes_por_classe", "metodos_suspeitos", "enums_invalidos",
-                     "compilacao",
+                     "compilacao", "execucao", "cmake",
                      "classes_legado", "classes_indisponiveis", "fontes_nao_api",
                      "correcoes_automaticas", "fontes", "tentativas"}
         self.assertEqual(set(r), esperadas)

@@ -77,6 +77,21 @@ def _rodape(resultado: dict) -> str:
     else:
         linhas.append("✅ **Names and signatures verified** — classes, headers, methods and arity really exist in NeoPZ.")
 
+    execucao = resultado.get("execucao", {"status": "nao_executada"})
+    if execucao["status"] == "ok":
+        arquivos = ", ".join(f"`{a}`" for a in execucao.get("arquivos", []))
+        linhas.append(f"▶️ **Executed** — the program ran and exited with code 0 in {execucao.get('tempo_s', 0)}s"
+                      + (f"; files written: {arquivos}" if arquivos else "")
+                      + ". The physical result is still not verified.")
+    elif execucao["status"] in ("crash", "erro_execucao", "timeout", "erro_build", "timeout_build"):
+        detalhe = {"crash": f"crashed ({execucao.get('sinal', '')})",
+                   "erro_execucao": f"exited with code {execucao.get('codigo_saida')}",
+                   "timeout": "did not finish within the time limit",
+                   "erro_build": "failed to link", "timeout_build": "took too long to build"}[execucao["status"]]
+        saida = execucao.get("saida") or "\n".join(execucao.get("erros", []))
+        linhas.append(f"⚠️ **Compiled, but the program {detalhe}**"
+                      + (f":\n```\n{saida}\n```" if saida else ""))
+
     if resultado["classes_legado"]:
         dicas = [f"{c} → prefer {_ctx.renames[c]}" if c in _ctx.renames else c
                  for c in resultado["classes_legado"]]
@@ -204,7 +219,9 @@ def responder(mensagem, historico_ui, usar_agente=False):
 
     if resultado_final:
         _registrar_interacao(mensagem, resultado_final)
-        yield resultado_final["resposta"] + _rodape(resultado_final)
+        cmake = resultado_final.get("cmake") if resultado_final["valido"] else ""
+        yield (resultado_final["resposta"] + (f"\n\n{cmake}" if cmake else "")
+               + _rodape(resultado_final))
 
 
 # ── App ────────────────────────────────────────────────────────────────────────

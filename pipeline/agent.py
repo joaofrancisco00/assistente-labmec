@@ -11,6 +11,7 @@ def _resultado_sem_verificacao(resposta: str, fontes: set) -> dict:
     v = {"resposta": resposta, "alucinacoes": [], "erros_aridade": [], "erros_semanticos": [],
          "includes": {}, "includes_por_classe": {}, "metodos_suspeitos": [], "enums_invalidos": {},
          "compilacao": {"status": "nao_executada", "erros": [], "ignorados": 0},
+         "execucao": {"status": "nao_executada"}, "cmake": "",
          "classes_legado": [], "classes_indisponiveis": {}, "correcoes_automaticas": []}
     return _resultado_de(v, False, fontes, 1)
 

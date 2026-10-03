@@ -17,7 +17,8 @@
   (rebuilds only the `neopz_wiki` collection of `banco_chroma_develop/`).
 - Benchmark, fully local and without spending Gemini quota:
   `env -u GOOGLE_API_KEY LLM_CACHE=1 uv run eval_benchmark.py`
-  (`--agente` for the agent mode, `--grupo com_receita|sem_receita`, `--casos a,b`).
+  (`--agente` for the agent mode, `--grupo com_receita|sem_receita`, `--casos a,b`,
+  `--executar` to also link and run the complete programs).
   Retrieval is exact and deterministic (`pipeline/banco.py` replaces Chroma's approximate
   HNSW search), so the same question always yields the same prompt and hits the cache.
 - Slow determinism test (loads the index in 2 processes):
