@@ -3,8 +3,12 @@ import yaml
 from pathlib import Path
 
 from .compilation import _extrair_blocos_codigo
+from .retrieval import _pergunta_e_explicativa
 
 _COMENTARIO_RE = re.compile(r'//[^\n]*|/\*.*?\*/', re.DOTALL)
+
+_PERGUNTA_COMPARATIVA_RE = re.compile(
+    r'(?i)diferen[çc]a|difference|\bcompar|\bvs\.?\b|versus')
 
 _RULES_FILE = Path(__file__).parent / "rules" / "semantic.yaml"
 _regras_cache = None
@@ -24,7 +28,7 @@ def _carregar_regras() -> list[dict]:
         
     return _regras_cache
 
-def validar_semantica(codigo: str) -> list[str]:
+def validar_semantica(codigo: str, pergunta: str = None) -> list[str]:
     """
     Verifica se o código gerado pelo modelo fere regras semânticas
     de domínio do NeoPZ.
@@ -34,22 +38,21 @@ def validar_semantica(codigo: str) -> list[str]:
     if not codigo:
         return erros
     codigo = _COMENTARIO_RE.sub("", _extrair_blocos_codigo(codigo) or codigo)
-        
-    regras = _carregar_regras()
-    for regra in regras:
-        if re.search(regra["padrao"], codigo):
-            violado = False
-            # Check requer:
-            if regra.get("requer"):
-                if not re.search(regra["requer"], codigo):
-                    violado = True
-                    
-            # Check incompativel_com:
-            if not violado and regra.get("incompativel_com"):
-                if re.search(regra["incompativel_com"], codigo):
-                    violado = True
-                    
-            if violado:
-                erros.append(regra["aviso"])
-                
+    pedido_de_codigo = (bool(pergunta) and not _pergunta_e_explicativa(pergunta)
+                        and not _PERGUNTA_COMPARATIVA_RE.search(pergunta))
+
+    for regra in _carregar_regras():
+        if regra.get("pergunta"):
+            if not pedido_de_codigo or not re.search(regra["pergunta"], pergunta):
+                continue
+        if regra.get("padrao") and not re.search(regra["padrao"], codigo):
+            continue
+        # Check requer:
+        violado = bool(regra.get("requer")) and not re.search(regra["requer"], codigo)
+        # Check incompativel_com:
+        if not violado and regra.get("incompativel_com"):
+            violado = bool(re.search(regra["incompativel_com"], codigo))
+        if violado:
+            erros.append(regra["aviso"])
+
     return erros

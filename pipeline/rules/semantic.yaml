@@ -28,3 +28,24 @@ rules:
     requer: '\bSetConstantPermeability\b'
     incompativel_com: '\bTPZHybridDarcyFlow\b|\bTPZMixedDarcyFlow\b'
     aviso: "You are using TPZDarcyFlow (H1 formulation), but forgot to call SetConstantPermeability(). Add a call to that method. Keep the TPZDarcyFlow class, do not change the material."
+
+  - nome: "Request for H(div) - H(div) space"
+    pergunta: '(?i)\bh\s*[-(]?\s*div\b'
+    padrao: null
+    requer: '\bSetAllCreateFunctionsHDiv\b|\bTPZHDivApproxCreator\b'
+    incompativel_com: null
+    aviso: "The request is for an H(div) approximation space, but the code does not create one. Use cmesh->SetAllCreateFunctionsHDiv() (or TPZHDivApproxCreator); SetAllCreateFunctionsContinuous() creates a continuous H1 space."
+
+  - nome: "Request for 3D - dimension 3"
+    pergunta: '(?i)\b3\s*-?\s*d\b|three[- ]dimensional'
+    padrao: null
+    requer: null
+    incompativel_com: '\bdim\s*(=\s*2\b|\{\s*2\s*\})'
+    aviso: "The request is for a 3D problem, but the code sets dim = 2. Use dimension 3 for the geometric mesh, the computational mesh and the material."
+
+  - nome: "Request for mixed formulation - multiphysics mesh"
+    pergunta: '(?i)mixed\s+(formulation|method|finite\s+element)|formula[çc][ãa]o\s+mista|m[ée]todo\s+misto'
+    padrao: null
+    requer: '\bTPZMultiphysicsCompMesh\b|\bTPZHDivApproxCreator\b'
+    incompativel_com: null
+    aviso: "The request is for a mixed formulation, which needs a flux (H(div)) and a pressure mesh combined in a TPZMultiphysicsCompMesh (or TPZHDivApproxCreator). The code builds a single-space mesh."

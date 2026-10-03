@@ -193,7 +193,7 @@ def _recursos_validacao(ctx) -> dict:
 def _verificar_resposta(
     resposta: str, *, whitelist, headers_whitelist, methods_whitelist,
     class_header_index, class_methods_index, collisions, renames,
-    legacy_classes, destinos, enum_values_index=None, on_evento=None,
+    legacy_classes, destinos, enum_values_index=None, pergunta=None, on_evento=None,
 ) -> dict:
     tem_codigo = _resposta_contem_codigo(resposta)
     correcoes_automaticas = []
@@ -225,7 +225,7 @@ def _verificar_resposta(
         includes_errados = _validar_includes(resposta, headers_whitelist)
         includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
         metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
-        erros_semanticos = validar_semantica(resposta)
+        erros_semanticos = validar_semantica(resposta, pergunta)
         enums_invalidos = _validar_enums(resposta, enum_values_index)
     else:
         includes_errados = {}
@@ -465,7 +465,7 @@ def gerar_codigo(
                 raise
         llm_cache.salvar(llm, prompt, resposta)
 
-        v = _verificar_resposta(resposta, **recursos, on_evento=on_evento)
+        v = _verificar_resposta(resposta, **recursos, pergunta=pergunta, on_evento=on_evento)
         resposta = v["resposta"]
         nomes_ok = v["nomes_ok"]
         classes_alucinadas = v["alucinacoes"]

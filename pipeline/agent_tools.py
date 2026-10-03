@@ -4,7 +4,7 @@ from .context import PipelineContext
 from . import _descrever_problemas, _recursos_validacao, _verificar_resposta
 from .retrieval import _buscar_declaracoes_por_nome
 
-def obter_todas_ferramentas(ctx: PipelineContext):
+def obter_todas_ferramentas(ctx: PipelineContext, pergunta: str = None):
 
     @tool
     def get_class_declaration(class_name: Annotated[str, "The exact NeoPZ class name, e.g. TPZGeoMesh"]) -> str:
@@ -49,7 +49,7 @@ def obter_todas_ferramentas(ctx: PipelineContext):
         ALWAYS use this tool to validate your idea BEFORE giving the final answer with the generated code to the user, making sure what you deliver actually works."""
         if "```" not in cpp_code:
             cpp_code = f"```cpp\n{cpp_code}\n```"
-        v = _verificar_resposta(cpp_code, **_recursos_validacao(ctx))
+        v = _verificar_resposta(cpp_code, **_recursos_validacao(ctx), pergunta=pergunta)
         corrigido = ""
         if v["correcoes_automaticas"]:
             corrigido = ("\nNOTE: the validator applied these automatic fixes; apply them in your final answer too: "

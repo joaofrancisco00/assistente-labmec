@@ -35,7 +35,7 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         llm = llm.model_copy(update={"max_retries": 4})
     
     try:
-        tools = obter_todas_ferramentas(ctx)
+        tools = obter_todas_ferramentas(ctx, pergunta)
         # Validação simples se o modelo suporta
         llm.bind_tools(tools)
     except Exception:
@@ -110,5 +110,6 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
     if houve_erro:
         return _resultado_sem_verificacao(resposta_final, fontes_usadas)
 
-    v = _verificar_resposta(resposta_final, **_recursos_validacao(ctx), on_evento=on_evento)
+    v = _verificar_resposta(resposta_final, **_recursos_validacao(ctx), pergunta=pergunta,
+                            on_evento=on_evento)
     return _resultado_de(v, v["valido"], fontes_usadas, 1)
