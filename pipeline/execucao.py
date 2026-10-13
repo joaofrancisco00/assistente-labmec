@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import signal
@@ -22,7 +23,9 @@ _MAX_CHARS_SAIDA = 2000
 _IMPORTED_LOCATION_RE = re.compile(r'IMPORTED_LOCATION_\w+\s+"([^"]+)"')
 _RAIZ_FONTE_NEOPZ = Path(__file__).resolve().parent.parent / "base_de_dados" / "neopz"
 _DEBUGSTOP_RE = re.compile(r"breakpoint at (\S+?):(\d+)")
-_FALHAS_EXECUCAO = {"crash", "erro_execucao", "timeout", "erro_build"}
+_FALHAS_EXECUCAO = {"crash", "erro_execucao", "timeout", "erro_build", "resultado_inconsistente"}
+_MAX_VTKS, _MAX_BYTES_VTK = 5, 50_000_000
+_PEDE_VTK_RE = re.compile(r'\bPostProcess\s*\(|\bTPZVTKGenerator\b')
 _LINHAS_ANTES, _LINHAS_DEPOIS = 8, 2
 _DEFINICOES_RE = re.compile(r'INTERFACE_COMPILE_DEFINITIONS\s+"([^"]+)"')
 
@@ -63,6 +66,66 @@ def _erros_de_build(stderr: str) -> list:
     return erros[:MAX_ERROS_RELATADOS]
 
 
+def _ler_vtk(caminho: Path) -> dict:
+    linhas = caminho.read_text(encoding="utf-8", errors="replace").split("\n")
+    pontos, campos, i = 0, {}, 0
+    while i < len(linhas):
+        tokens = linhas[i].split()
+        if tokens[:1] == ["POINT_DATA"]:
+            pontos = int(tokens[1])
+        elif tokens[:1] in (["SCALARS"], ["VECTORS"]) and pontos:
+            nome, n = tokens[1], pontos * (1 if tokens[0] == "SCALARS" else 3)
+            i += 1
+            if i < len(linhas) and linhas[i].startswith("LOOKUP_TABLE"):
+                i += 1
+            valores = []
+            while len(valores) < n and i < len(linhas):
+                valores += [float(x) for x in linhas[i].split()]
+                i += 1
+            finitos = [abs(v) for v in valores if math.isfinite(v)]
+            campos[nome] = {"nao_finitos": len(valores) - len(finitos),
+                            "max_abs": max(finitos, default=0.0)}
+            continue
+        i += 1
+    return {"pontos": pontos, "campos": campos}
+
+
+def _analisar_vtks(pasta: Path) -> dict:
+    resumo = {}
+    for vtk in sorted(pasta.glob("*.vtk"))[:_MAX_VTKS]:
+        if vtk.stat().st_size <= _MAX_BYTES_VTK:
+            try:
+                resumo[vtk.name] = _ler_vtk(vtk)
+            except (ValueError, IndexError):
+                continue
+    return resumo
+
+
+def _checar_resultado(codigo: str, vtks: dict) -> list:
+    if not vtks:
+        return (["The code calls PostProcess/TPZVTKGenerator, but no .vtk file was written."]
+                if _PEDE_VTK_RE.search(codigo) else [])
+    problemas = []
+    for arquivo, info in vtks.items():
+        if info["pontos"] == 0:
+            problemas.append(f"{arquivo} has 0 points: the computational mesh is empty "
+                             "(missing AutoBuild()? material ids that do not match the geometric mesh?).")
+            continue
+        for nome, campo in info["campos"].items():
+            if campo["nao_finitos"]:
+                problemas.append(f"Field {nome} in {arquivo} has {campo['nao_finitos']} NaN/Inf values: "
+                                 "the system is probably singular (missing boundary condition, "
+                                 "wrong solver or material parameters).")
+        zerados = [n for n, c in info["campos"].items() if c["max_abs"] == 0 and not c["nao_finitos"]]
+        nao_zerados = [n for n, c in info["campos"].items() if c["max_abs"] > 0]
+        if zerados and nao_zerados:
+            problemas.append(f"Field(s) {', '.join(zerados)} in {arquivo} are zero at all "
+                             f"{info['pontos']} points, while {', '.join(nao_zerados)} are not. "
+                             "Check how the material is constructed (constitutive parameters, "
+                             "constructor arguments).")
+    return problemas
+
+
 def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
     if not _programa_completo(resposta):
         return {"status": "nao_aplicavel"}
@@ -95,6 +158,7 @@ def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
             saida = (e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             return {"status": "timeout", "saida": _ultimas_linhas(saida), "timeout_s": timeout}
 
+        vtks = _analisar_vtks(Path(tmp)) if proc.returncode == 0 else {}
         resultado = {
             "saida":        _ultimas_linhas(proc.stdout + "\n" + proc.stderr),
             "arquivos":     sorted(p.name for p in Path(tmp).iterdir()
@@ -102,7 +166,11 @@ def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
             "tempo_s":      round(time.monotonic() - inicio, 2),
             "codigo_saida": proc.returncode,
         }
-    if proc.returncode == 0:
+    problemas = _checar_resultado(_extrair_blocos_codigo(resposta), vtks) if proc.returncode == 0 else []
+    if problemas:
+        resultado["status"] = "resultado_inconsistente"
+        resultado["problemas_resultado"] = problemas
+    elif proc.returncode == 0:
         resultado["status"] = "ok"
     elif proc.returncode < 0:
         resultado["status"] = "crash"
@@ -140,7 +208,10 @@ def _descrever_falha_execucao(execucao: dict) -> str:
         "timeout":       (f"The program did not finish within {execucao.get('timeout_s')}s "
                           "(mesh too large, or a loop that never ends)."),
         "erro_build":    "The program compiled but failed to link against libpz.",
+        "resultado_inconsistente": "The program ran and exited with code 0, but its result is "
+                                   "inconsistent:",
     }[status]]
+    partes.extend(f"  - {p}" for p in execucao.get("problemas_resultado", []))
     saida = execucao.get("saida") or "\n".join(execucao.get("erros", []))
     if saida:
         partes.append("Program output (last lines):\n" + saida)

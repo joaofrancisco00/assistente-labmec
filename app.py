@@ -83,6 +83,9 @@ def _rodape(resultado: dict) -> str:
         linhas.append(f"▶️ **Executed** — the program ran and exited with code 0 in {execucao.get('tempo_s', 0)}s"
                       + (f"; files written: {arquivos}" if arquivos else "")
                       + ". The physical result is still not verified.")
+    elif execucao["status"] == "resultado_inconsistente":
+        linhas.append("⚠️ **The program ran, but the result is inconsistent**:\n" + "\n".join(
+            f"- {problema}" for problema in execucao.get("problemas_resultado", [])))
     elif execucao["status"] in ("crash", "erro_execucao", "timeout", "erro_build", "timeout_build"):
         detalhe = {"crash": f"crashed ({execucao.get('sinal', '')})",
                    "erro_execucao": f"exited with code {execucao.get('codigo_saida')}",

@@ -198,6 +198,12 @@ código de saída ≠ 0, timeout), a resposta é reprovada e o modelo recebe uma
 nova tentativa com a saída do programa e, quando o NeoPZ para num
 `DebugStop()`, o trecho do código-fonte do NeoPZ onde a checagem falhou.
 
+Mesmo com código de saída 0, o resultado passa por checagens de bom senso no
+`.vtk`: arquivo pedido e não gravado, malha com 0 pontos, valores NaN/Inf e
+campo zerado enquanto outro não está (ex.: `TPZElasticity2D(id)` +
+`SetElasticity` grava `SigmaX`/`SigmaY` zerados com deslocamento não nulo).
+Isso não verifica se o resultado está *certo*, só se é coerente.
+
 ```bash
 EXECUTAR_CODIGO=1 caffeinate -i uv run app.py
 ```

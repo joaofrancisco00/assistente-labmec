@@ -268,5 +268,78 @@ class TestRetryPorFalhaDeExecucao(unittest.TestCase):
         self.assertEqual(r["compilacao"]["status"], "ok")
 
 
+def _vtk(pontos, campos):
+    linhas = ["# vtk DataFile Version 3.0", "Arquivo gerado por PZ", "ASCII", "",
+              "DATASET UNSTRUCTURED_GRID", f"POINT_DATA {pontos}"]
+    for nome, (tipo, valores) in campos.items():
+        linhas += [f"{tipo} {nome} float"] + (["LOOKUP_TABLE default"] if tipo == "SCALARS" else [])
+        linhas += [" ".join(str(v) for v in valores)]
+    return "\n".join(linhas) + "\n"
+
+
+class TestChecagemDoResultado(unittest.TestCase):
+    def _checar(self, conteudo, codigo='an.PostProcess(1, 2);'):
+        with tempfile.TemporaryDirectory() as tmp:
+            if conteudo is not None:
+                (Path(tmp) / "saida.vtk").write_text(conteudo)
+            return execucao._checar_resultado(codigo, execucao._analisar_vtks(Path(tmp)))
+
+    def test_leitura_do_vtk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            arq = Path(tmp) / "a.vtk"
+            arq.write_text(_vtk(2, {"S": ("SCALARS", [0.5, -2]), "U": ("VECTORS", [1, 0, 0, 3, 0, 0])}))
+            info = execucao._ler_vtk(arq)
+        self.assertEqual(info["pontos"], 2)
+        self.assertEqual(info["campos"]["S"]["max_abs"], 2.0)
+        self.assertEqual(info["campos"]["U"]["max_abs"], 3.0)
+
+    def test_campo_zerado_com_outro_nao_zerado_e_inconsistente(self):
+        problemas = self._checar(_vtk(2, {"SigmaX": ("SCALARS", [0, 0]),
+                                          "Displacement": ("VECTORS", [1, 0, 0, 2, 0, 0])}))
+        self.assertEqual(len(problemas), 1)
+        self.assertIn("SigmaX", problemas[0])
+
+    def test_tudo_zero_pode_ser_solucao_correta(self):
+        self.assertEqual(self._checar(_vtk(2, {"Solution": ("SCALARS", [0, 0]),
+                                               "Derivative": ("VECTORS", [0] * 6)})), [])
+
+    def test_nan_e_sempre_problema(self):
+        problemas = self._checar(_vtk(2, {"Solution": ("SCALARS", ["nan", 1.0])}))
+        self.assertTrue(any("NaN" in p for p in problemas))
+
+    def test_malha_vazia(self):
+        problemas = self._checar(_vtk(0, {}))
+        self.assertTrue(any("0 points" in p for p in problemas))
+
+    def test_vtk_pedido_e_nao_gravado(self):
+        self.assertTrue(self._checar(None))
+        self.assertEqual(self._checar(None, codigo="int x = 1;"), [])
+
+    def test_resultado_normal_passa(self):
+        self.assertEqual(self._checar(_vtk(2, {"Solution": ("SCALARS", [0.1, 0.2]),
+                                               "Derivative": ("VECTORS", [1, 0, 0, 1, 0, 0])})), [])
+
+
+@precisa_neopz
+class TestResultadoDeVerdade(unittest.TestCase):
+    def test_set_elasticity_grava_tensoes_zeradas_e_e_pego(self):
+        receita = (RAIZ / "reference_solutions/task_04_elasticidade2d/elasticidade.cpp").read_text()
+        curto = receita.replace(
+            "auto *mat = new TPZElasticity2D(matIdDomain, E, nu, fx, fy, planeStress);",
+            "auto *mat = new TPZElasticity2D(matIdDomain); mat->SetElasticity(E, nu); "
+            "mat->SetBodyForce(fx, fy);")
+        self.assertNotEqual(curto, receita)
+        r = execucao._executar_codigo(bloco(curto))
+        self.assertEqual(r["status"], "resultado_inconsistente", r)
+        self.assertIn("SigmaX", r["problemas_resultado"][0])
+        self.assertIn("SigmaX", execucao._descrever_falha_execucao(r))
+
+    def test_sem_autobuild_e_pego(self):
+        receita = (RAIZ / "reference_solutions/task_03_poisson2d/poisson.cpp").read_text()
+        sem = "\n".join(l for l in receita.splitlines() if "AutoBuild" not in l)
+        r = execucao._executar_codigo(bloco(sem))
+        self.assertEqual(r["status"], "resultado_inconsistente", r)
+
+
 if __name__ == "__main__":
     unittest.main()
