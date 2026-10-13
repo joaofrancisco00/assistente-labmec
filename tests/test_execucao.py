@@ -178,5 +178,95 @@ class TestExecucaoNoPipeline(unittest.TestCase):
         self.assertIn("find_package(NeoPZ REQUIRED)", v["cmake"])
 
 
+SAIDA_DEBUGSTOP = ("Incompatible matrix type in void TPZCompMesh::Foo()\n\n\n"
+                   "Your chance to put a breakpoint at /Users/x/build/neopz/Mesh/pzcmesh.cpp:495\n"
+                   "libc++abi: terminating due to uncaught exception of type std::bad_exception")
+
+
+class TestDiagnosticoDeExecucao(unittest.TestCase):
+    def test_debugstop_aponta_o_trecho_do_fonte_do_neopz(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fonte = Path(tmp) / "neopz" / "Mesh" / "pzcmesh.cpp"
+            fonte.parent.mkdir(parents=True)
+            fonte.write_text("\n".join(f"linha {i}" for i in range(1, 600)))
+            with patch.object(execucao, "_RAIZ_FONTE_NEOPZ", Path(tmp) / "neopz"):
+                texto = execucao._descrever_falha_execucao(
+                    {"status": "crash", "sinal": "SIGABRT", "saida": SAIDA_DEBUGSTOP})
+        self.assertIn("SIGABRT", texto)
+        self.assertIn("Incompatible matrix type", texto)
+        self.assertIn("Mesh/pzcmesh.cpp:495", texto)
+        self.assertIn("linha 495", texto)
+        self.assertIn("linha 490", texto)
+
+    def test_sem_debugstop_usa_so_a_saida(self):
+        texto = execucao._descrever_falha_execucao(
+            {"status": "erro_execucao", "codigo_saida": 3, "saida": "deu ruim"})
+        self.assertIn("exit code 3", texto)
+        self.assertIn("deu ruim", texto)
+
+    def test_execucao_ok_nao_e_falha(self):
+        self.assertEqual(execucao._descrever_falha_execucao({"status": "ok"}), "")
+        self.assertEqual(execucao._descrever_falha_execucao({"status": "nao_executada"}), "")
+
+
+class _LLMSequencia:
+    def __init__(self, *respostas):
+        self.respostas, self.prompts = list(respostas), []
+
+    def stream(self, prompt):
+        self.prompts.append(prompt)
+        yield self.respostas[min(len(self.prompts) - 1, len(self.respostas) - 1)]
+
+
+class _DBVazio:
+    def max_marginal_relevance_search(self, *a, **kw):
+        return []
+
+    def similarity_search(self, *a, **kw):
+        return []
+
+
+class TestRetryPorFalhaDeExecucao(unittest.TestCase):
+    CRASH = {"status": "crash", "sinal": "SIGABRT", "saida": "Incompatible matrix type", "arquivos": []}
+    OK = {"status": "ok", "saida": "", "arquivos": [], "tempo_s": 0.1, "codigo_saida": 0}
+    COMPILOU = {"status": "ok", "erros": [], "ignorados": 0}
+
+    def _gerar(self, llm, execucoes, compilacoes=None):
+        db = _DBVazio()
+        with patch.dict(os.environ, {"EXECUTAR_CODIGO": "1"}), \
+             patch.object(pipeline, "_compilar_codigo", side_effect=compilacoes or [self.COMPILOU] * 3), \
+             patch.object(pipeline, "_executar_codigo", side_effect=execucoes), \
+             patch.object(pipeline, "validar_semantica", return_value=[]), \
+             patch.object(pipeline.time, "sleep"), \
+             redirect_stdout(io.StringIO()):
+            return pipeline.gerar_codigo("programa", llm=llm, headers_db=db, examples_db=db,
+                                         whitelist=set(), headers_whitelist=set(),
+                                         system_base="sistema")
+
+    def test_crash_reprova_e_dispara_retry_com_o_erro(self):
+        llm = _LLMSequencia(bloco(PROGRAMA_OK))
+        r = self._gerar(llm, [self.CRASH, self.OK])
+        self.assertTrue(r["valido"])
+        self.assertEqual(r["tentativas"], 2)
+        self.assertNotIn("FAILED AT RUNTIME", llm.prompts[0])
+        self.assertIn("FAILED AT RUNTIME", llm.prompts[1])
+        self.assertIn("Incompatible matrix type", llm.prompts[1])
+
+    def test_todas_quebrando_devolve_resposta_invalida_com_a_execucao(self):
+        llm = _LLMSequencia(bloco(PROGRAMA_OK))
+        r = self._gerar(llm, [self.CRASH] * 3)
+        self.assertFalse(r["valido"])
+        self.assertEqual(r["execucao"]["status"], "crash")
+
+    def test_melhor_tentativa_prefere_a_que_compilou(self):
+        erro_gpp = {"status": "erros", "erros": ["'x' has no member named 'y'"], "ignorados": 0}
+        llm = _LLMSequencia(bloco(PROGRAMA_OK.replace("ola", "um")), bloco(PROGRAMA_OK.replace("ola", "dois")),
+                            bloco(PROGRAMA_OK.replace("ola", "tres")))
+        r = self._gerar(llm, [self.CRASH], compilacoes=[erro_gpp, self.COMPILOU, erro_gpp])
+        self.assertFalse(r["valido"])
+        self.assertIn("dois", r["resposta"])
+        self.assertEqual(r["compilacao"]["status"], "ok")
+
+
 if __name__ == "__main__":
     unittest.main()

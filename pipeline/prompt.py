@@ -76,6 +76,7 @@ def _montar_prompt(
     erros_compilacao: list = None,
     erros_semanticos: list = None,
     enums_invalidos: dict = None,
+    erro_execucao: str = None,
     classes_contexto: set = None,
     renames: dict = None,
     historico: list = None,
@@ -176,6 +177,15 @@ def _montar_prompt(
             "does NOT belong to class Y — even if it exists in ANOTHER NeoPZ class.\n"
             "Use only the methods that appear in the declaration of the class itself,\n"
             "in the context above. Do not swap the method for a 'similar' one without checking."
+        )
+
+    if erro_execucao:
+        instrucao_correcao += (
+            "\n\n❌ THE PREVIOUS CODE COMPILED BUT FAILED AT RUNTIME:\n"
+            + "\n".join(f"  {l}" for l in erro_execucao.splitlines())
+            + "\nFind the cause in the code (wrong setup order, missing call, wrong sizes or ids)\n"
+            "and fix it. If NeoPZ stopped at a check (DebugStop), the excerpt above shows the\n"
+            "condition that failed."
         )
 
     if erros_semanticos:

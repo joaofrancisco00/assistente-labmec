@@ -247,6 +247,21 @@ CASOS = [
         },
     },
     {
+        "nome": "elasticidade_3d",
+        "receita": False,
+        "programa": True,
+        "pergunta": ("Write complete C++ code with NeoPZ to solve a 3D linear elasticity "
+                     "problem on a unit cube meshed with hexahedra, with all the necessary includes."),
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "compilou":            _compilou,
+            "material_3d":         lambda r: "TPZElasticity3D" in r["resposta"],
+            "nao_usa_2d_em_3d":    lambda r: "TPZElasticity2D" not in r["resposta"],
+            "dimensao_3d":         lambda r: _DIM_3_RE.search(r["resposta"]) is not None,
+            "sem_api_antiga":      lambda r: not r["classes_legado"],
+        },
+    },
+    {
         "nome": "refinamento_uniforme",
         "programa": True,
         "receita": False,

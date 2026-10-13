@@ -115,7 +115,13 @@ from .prompt import (
 )
 
 from .semantic_check import validar_semantica
-from .execucao import _executar_codigo, _execucao_ligada, _instrucoes_cmake
+from .execucao import (
+    _descrever_falha_execucao,
+    _executar_codigo,
+    _execucao_falhou,
+    _execucao_ligada,
+    _instrucoes_cmake,
+)
 
 from . import (
     config,
@@ -273,7 +279,8 @@ def _verificar_resposta(
         print(f"  ▶️  Execução: {execucao['status']}"
               + (f" — {execucao['erros'][0]}" if execucao.get("erros") else ""))
 
-    valido = nomes_ok and compilacao["status"] != "erros"
+    valido = (nomes_ok and compilacao["status"] != "erros"
+              and not _execucao_falhou(execucao))
     if valido and compilacao["status"] == "ok":
         print("  ✅ Compilado — o g++ aceitou o código: classes, métodos e assinaturas "
               "existem de verdade (o resultado físico continua não verificado)")
@@ -334,6 +341,9 @@ def _descrever_problemas(v: dict) -> list:
                      for k, i in v["enums_invalidos"].items())
     problemas.extend(f"Domain rule violated: {e}" for e in v["erros_semanticos"])
     problemas.extend(f"Compiler error: {e}" for e in v["compilacao"]["erros"])
+    falha = _descrever_falha_execucao(v.get("execucao", {}))
+    if falha:
+        problemas.append(f"Runtime failure: {falha}")
     return problemas
 
 
@@ -405,6 +415,7 @@ def gerar_codigo(
     erros_compilacao = None
     erros_semanticos = None
     enums_invalidos = None
+    erro_execucao = None
     nomes_ok = False
 
     melhor = None
@@ -430,6 +441,7 @@ def gerar_codigo(
             erros_compilacao=erros_compilacao,
             erros_semanticos=erros_semanticos,
             enums_invalidos=enums_invalidos,
+            erro_execucao=erro_execucao,
             classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
             renames=renames,
             historico=historico,
@@ -486,12 +498,15 @@ def gerar_codigo(
         erros_semanticos = v["erros_semanticos"]
         enums_invalidos = v["enums_invalidos"]
         erros_compilacao = v["compilacao"]["erros"] or None
+        erro_execucao = _descrever_falha_execucao(v["execucao"]) or None
 
         if v["valido"]:
             return _resultado_de(v, True, fontes, tentativa)
 
-        if nomes_ok and melhor is None:
-            melhor = _resultado_de(v, False, fontes, tentativa)
+        if nomes_ok:
+            nota = 2 if v["compilacao"]["status"] == "ok" else 1
+            if melhor is None or nota > nota_melhor:
+                melhor, nota_melhor = _resultado_de(v, False, fontes, tentativa), nota
 
         if tentativa >= MAX_RETRIES + 1:
             print("  ⚠️  Limite de tentativas atingido.")
@@ -531,12 +546,15 @@ def gerar_codigo(
             print(f"  📚 Contexto reforçado com declarações de: {nomes}")
 
         motivo = ("Compilation failed" if erros_compilacao
+                  else "The program failed at runtime" if erro_execucao
                   else "Validation problems detected")
         _emitir(on_evento, "status", f"↩️ {motivo} — fixing and generating again...")
         print("  ↩️  Corrigindo na próxima tentativa...")
 
-    if melhor is not None and not nomes_ok:
-        print("  ↩️  Devolvendo a melhor tentativa (nomes limpos, compilação reprovada).")
+    if melhor is not None:
+        if melhor["resposta"] != v["resposta"]:
+            print("  ↩️  Devolvendo a melhor tentativa (nomes limpos; compilou, se alguma compilou).")
+        melhor["tentativas"] = tentativa
         return melhor
     return _resultado_de(v, False, fontes, tentativa)
 

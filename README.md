@@ -100,7 +100,7 @@ Toda resposta vem com um selo no rodapé:
 | `header_index/` | Tabela determinística para o corretor automático de `#include` |
 | `banco_chroma_develop/` | Índice vetorial + whitelists (gerado; fora do git) |
 | `base_de_dados/neopz/` | Código do NeoPZ (submodule pinado em `852a5116c`) |
-| `eval_benchmark.py` | Benchmark automático de qualidade (12 perguntas, 64 checks; RAG ou agente) |
+| `eval_benchmark.py` | Benchmark automático de qualidade (13 perguntas; RAG ou agente) |
 | `logs/` | Logs de interações e resultados de benchmark |
 | `tests/` | Testes de regressão (`python3 -m unittest discover -s tests`) |
 
@@ -193,7 +193,10 @@ ser `✅ Nomes verificados`. **Falta de compilador nunca reprova uma resposta.**
 Com `EXECUTAR_CODIGO=1`, quando a resposta é um programa completo (um único
 bloco com `main`) e compila, o pipeline também o **linka contra a `libpz` e
 executa** numa pasta temporária, com timeout. O rodapé mostra `▶️ Executed`
-(com os arquivos gravados, ex.: o `.vtk`) ou o crash / código de saída.
+(com os arquivos gravados, ex.: o `.vtk`). Se o programa quebrar (crash,
+código de saída ≠ 0, timeout), a resposta é reprovada e o modelo recebe uma
+nova tentativa com a saída do programa e, quando o NeoPZ para num
+`DebugStop()`, o trecho do código-fonte do NeoPZ onde a checagem falhou.
 
 ```bash
 EXECUTAR_CODIGO=1 caffeinate -i uv run app.py

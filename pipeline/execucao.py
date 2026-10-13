@@ -20,6 +20,10 @@ from .config import MAX_ERROS_RELATADOS, TIMEOUT_BUILD, TIMEOUT_EXECUCAO
 _MAX_LINHAS_SAIDA = 20
 _MAX_CHARS_SAIDA = 2000
 _IMPORTED_LOCATION_RE = re.compile(r'IMPORTED_LOCATION_\w+\s+"([^"]+)"')
+_RAIZ_FONTE_NEOPZ = Path(__file__).resolve().parent.parent / "base_de_dados" / "neopz"
+_DEBUGSTOP_RE = re.compile(r"breakpoint at (\S+?):(\d+)")
+_FALHAS_EXECUCAO = {"crash", "erro_execucao", "timeout", "erro_build"}
+_LINHAS_ANTES, _LINHAS_DEPOIS = 8, 2
 _DEFINICOES_RE = re.compile(r'INTERFACE_COMPILE_DEFINITIONS\s+"([^"]+)"')
 
 
@@ -106,6 +110,48 @@ def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
     else:
         resultado["status"] = "erro_execucao"
     return resultado
+
+
+def _execucao_falhou(execucao: dict) -> bool:
+    return execucao.get("status") in _FALHAS_EXECUCAO
+
+
+def _trecho_fonte_neopz(caminho: str, linha: int):
+    partes = Path(caminho).parts
+    for i in range(len(partes)):
+        candidato = _RAIZ_FONTE_NEOPZ.joinpath(*partes[i:])
+        if candidato.is_file():
+            break
+    else:
+        return None, None
+    linhas = candidato.read_text(encoding="utf-8", errors="replace").splitlines()
+    inicio, fim = max(0, linha - 1 - _LINHAS_ANTES), min(len(linhas), linha + _LINHAS_DEPOIS)
+    trecho = "\n".join(f"{n + 1:5d}  {linhas[n]}" for n in range(inicio, fim))
+    return str(candidato.relative_to(_RAIZ_FONTE_NEOPZ)), trecho
+
+
+def _descrever_falha_execucao(execucao: dict) -> str:
+    status = execucao.get("status")
+    if status not in _FALHAS_EXECUCAO:
+        return ""
+    partes = [{
+        "crash":         f"The program crashed ({execucao.get('sinal', 'signal')}).",
+        "erro_execucao": f"The program exited with exit code {execucao.get('codigo_saida')}.",
+        "timeout":       (f"The program did not finish within {execucao.get('timeout_s')}s "
+                          "(mesh too large, or a loop that never ends)."),
+        "erro_build":    "The program compiled but failed to link against libpz.",
+    }[status]]
+    saida = execucao.get("saida") or "\n".join(execucao.get("erros", []))
+    if saida:
+        partes.append("Program output (last lines):\n" + saida)
+    paradas = list(_DEBUGSTOP_RE.finditer(saida))
+    if paradas:
+        caminho, linha = paradas[-1].group(1), int(paradas[-1].group(2))
+        relativo, trecho = _trecho_fonte_neopz(caminho, linha)
+        if trecho:
+            partes.append(f"NeoPZ stopped (DebugStop) at {relativo}:{linha}. The check that "
+                          f"failed is in this NeoPZ source excerpt:\n{trecho}")
+    return "\n".join(partes)
 
 
 def _gerar_cmakelists(nome: str = "neopz_app") -> str:
