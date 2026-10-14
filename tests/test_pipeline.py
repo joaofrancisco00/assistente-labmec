@@ -447,6 +447,30 @@ class TestRegrasSemanticas(unittest.TestCase):
         self.assertEqual(pipeline.validar_semantica(codigo), [])
 
 
+class TestRegrasElasticidade3D(unittest.TestCase):
+    ELAST3D = ('```cpp\n'
+               '#include "Elasticity/TPZElasticity3D.h"\n'
+               '// in 3D it is TPZElasticity3D — the 2D class is ONLY for 2D\n'
+               'TPZManVector<STATE, 3> force = {0., 0., -1.};\n'
+               'auto *mat = new TPZElasticity3D(1, E, nu, force);\n'
+               '```\n')
+
+    def test_comentario_sobre_o_material_2d_nao_dispara(self):
+        # Regressão real do benchmark elasticidade_3d: o comentário citava a
+        # classe 2D e planeStress; o auto-include adicionava o header dela e a
+        # regra do construtor 2D reprovava as 3 tentativas de um código correto
+        self.assertEqual(pipeline.validar_semantica(self.ELAST3D), [])
+
+    def test_construtor_2d_transplantado_para_3d_e_pego(self):
+        codigo = ('```cpp\n'
+                  '#include "Elasticity/TPZElasticity3D.h"\n'
+                  'constexpr int planeStress{1};\n'
+                  'auto *mat = new TPZElasticity3D(id, E, nu, planeStress);\n'
+                  '```\n')
+        r = pipeline.validar_semantica(codigo)
+        self.assertTrue(any("TPZElasticity3D" in e for e in r), r)
+
+
 class TestHistoricoDeConversa(unittest.TestCase):
     def test_vazio_nao_adiciona_nada(self):
         self.assertEqual(pipeline._formatar_historico([]), "")

@@ -19,6 +19,7 @@ from pipeline.cpp_parser import (
     build_tiered_class_whitelist,
     extract_classes_from_header,
     find_suspicious_method_calls,
+    find_tpz_classes_in_code,
 )
 
 
@@ -141,6 +142,21 @@ class TestChamadasSuspeitas(unittest.TestCase):
         suspeitos_nome, _ = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
         self.assertIn(("TPZGeoMeshTools", "CreateRectMesh"), suspeitos_nome)
         self.assertNotIn(("TPZGeoMeshTools", "CreateGeoMeshOnGrid"), suspeitos_nome)
+
+
+class TestClassesEmComentarios(unittest.TestCase):
+    def test_classe_em_comentario_nao_conta(self):
+        # Regressão real: a receita de elasticidade 3D cita TPZElasticity2D num
+        # comentário; o auto-include adicionava o header da classe comentada e
+        # a regra semântica do 2D reprovava um código correto
+        codigo = ("auto *m = new TPZElasticity3D(1, E, nu, f); // not TPZElasticity2D\n"
+                  "/* TPZMatLaplacian */")
+        self.assertEqual(find_tpz_classes_in_code(codigo), {"TPZElasticity3D"})
+
+    def test_url_dentro_de_string_nao_vira_comentario(self):
+        codigo = 'const char *url = "http://exemplo.com/TPZDoc";  // TPZFoo\nTPZBar *b;'
+        self.assertEqual(find_tpz_classes_in_code(codigo),
+                         {"TPZDoc", "TPZBar"})
 
 
 if __name__ == "__main__":

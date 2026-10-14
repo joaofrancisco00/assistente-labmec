@@ -487,9 +487,25 @@ def find_enum_value_uses(code: str, enum_index: dict) -> list:
     return usos
 
 
+# Comentário OU string literal — as strings precisam entrar no mesmo token para
+# que um "http://..." (ou um // dentro de aspas) não seja confundido com
+# comentário. Strings são preservadas; comentários viram "".
+_COMENTARIO_OU_STRING_RE = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/', re.DOTALL)
+
+
+def remover_comentarios(code: str) -> str:
+    """Remove comentários // e /* */ de um trecho de código, preservando
+    string literals (sem virar lexer completo — só o suficiente para que uma
+    URL ou um // dentro de aspas não seja comido)."""
+    return _COMENTARIO_OU_STRING_RE.sub(
+        lambda m: "" if m.group(0).startswith("/") else m.group(0), code)
+
+
 def find_tpz_classes_in_code(code: str) -> set:
-    """Extrai todos os identificadores TPZxxx usados em um trecho de código."""
-    return set(re.findall(r'\bTPZ[A-Z]\w+', code))
+    """Extrai todos os identificadores TPZxxx usados em um trecho de código.
+    Comentários não contam — uma classe só citada num comentário não é uso."""
+    return set(re.findall(r'\bTPZ[A-Z]\w+', remover_comentarios(code)))
 
 
 # ── Validação de MÉTODOS (não só classe/header) ─────────────────────────────────
