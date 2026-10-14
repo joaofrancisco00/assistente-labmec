@@ -248,7 +248,7 @@ CASOS = [
     },
     {
         "nome": "elasticidade_3d",
-        "receita": False,
+        "receita": True,
         "programa": True,
         "pergunta": ("Write complete C++ code with NeoPZ to solve a 3D linear elasticity "
                      "problem on a unit cube meshed with hexahedra, with all the necessary includes."),
@@ -257,6 +257,9 @@ CASOS = [
             "compilou":            _compilou,
             "material_3d":         lambda r: "TPZElasticity3D" in r["resposta"],
             "nao_usa_2d_em_3d":    lambda r: "TPZElasticity2D" not in r["resposta"],
+            "construtor_3d":       lambda r: (re.search(r"TPZElasticity3D\s*\([^)]*,[^)]*,[^)]*,\s*\w+\s*\)",
+                                                        r["resposta"]) is not None
+                                              and "planeStress" not in r["resposta"]),
             "dimensao_3d":         lambda r: _DIM_3_RE.search(r["resposta"]) is not None,
             "sem_api_antiga":      lambda r: not r["classes_legado"],
         },
@@ -401,6 +404,8 @@ def main():
             "compilacao": resultado["compilacao"]["status"],
             "execucao":   resultado.get("execucao", {}).get("status", "nao_executada"),
             "tempo_s":    round(elapsed, 1),
+            "modelo":     resultado.get("modelo", getattr(llm, "model", "desconhecido")),
+            "diagnosticos": resultado.get("diagnosticos", []),
             "resposta":   resultado["resposta"],
         })
 
@@ -422,7 +427,7 @@ def main():
     saida.parent.mkdir(parents=True, exist_ok=True)
     saida.write_text(json.dumps({
         "quando":      datetime.datetime.now().isoformat(timespec="seconds"),
-        "modelo":      getattr(llm, "model", "desconhecido"),
+        "modelo":      "+".join(sorted({r["modelo"] for r in resultados_eval})),
         "modo":        modo,
         "executar":    args.executar,
         "resultado":   f"{ok_total}/{total}",

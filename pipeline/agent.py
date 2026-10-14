@@ -7,13 +7,13 @@ from .context import PipelineContext
 from .prompt import _formatar_contexto
 from .retrieval import _recuperar_contexto
 
-def _resultado_sem_verificacao(resposta: str, fontes: set) -> dict:
+def _resultado_sem_verificacao(resposta: str, fontes: set, llm=None) -> dict:
     v = {"resposta": resposta, "alucinacoes": [], "erros_aridade": [], "erros_semanticos": [],
          "includes": {}, "includes_por_classe": {}, "metodos_suspeitos": [], "enums_invalidos": {},
          "compilacao": {"status": "nao_executada", "erros": [], "ignorados": 0},
          "execucao": {"status": "nao_executada"}, "cmake": "",
          "classes_legado": [], "classes_indisponiveis": {}, "correcoes_automaticas": []}
-    return _resultado_de(v, False, fontes, 1)
+    return _resultado_de(v, False, fontes, 1, llm)
 
 
 _MODELOS_LOCAIS = ("OllamaLLM", "ChatOllama", "Ollama")
@@ -42,7 +42,7 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
     except Exception:
         return _resultado_sem_verificacao(
             "⚠️ Error: the current model does not support Tool Calling (Function Calling). "
-            "Switch to Gemini to use the Agent.", set())
+            "Switch to Gemini to use the Agent.", set(), llm)
 
     if on_evento:
         on_evento("status", "🔎 Retrieving NeoPZ context for the agent...")
@@ -109,8 +109,8 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         on_evento("status", "🏁 The Agent finished and produced its final answer.")
     
     if houve_erro:
-        return _resultado_sem_verificacao(resposta_final, fontes_usadas)
+        return _resultado_sem_verificacao(resposta_final, fontes_usadas, llm)
 
     v = _verificar_resposta(resposta_final, **_recursos_validacao(ctx), pergunta=pergunta,
                             on_evento=on_evento)
-    return _resultado_de(v, v["valido"], fontes_usadas, 1)
+    return _resultado_de(v, v["valido"], fontes_usadas, 1, llm)

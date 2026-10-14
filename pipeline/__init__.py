@@ -347,13 +347,16 @@ def _descrever_problemas(v: dict) -> list:
     return problemas
 
 
-def _resultado_de(v: dict, valido: bool, fontes, tentativas: int) -> dict:
+def _resultado_de(v: dict, valido: bool, fontes, tentativas: int,
+                  llm=None, diagnosticos: list = None) -> dict:
     return {
         **{k: v[k] for k in ("resposta", "alucinacoes", "erros_aridade", "erros_semanticos",
                              "includes", "includes_por_classe", "metodos_suspeitos",
                              "enums_invalidos", "compilacao", "execucao", "cmake", "classes_legado", "classes_indisponiveis",
                              "correcoes_automaticas")},
         "valido":         valido,
+        "modelo":         getattr(llm, "model", type(llm).__name__) if llm is not None else "desconhecido",
+        "diagnosticos":   diagnosticos if diagnosticos is not None else [],
         "fontes_nao_api": sorted(f for f in fontes if _fora_da_api(f) == "teste/benchmark"),
         "fontes":         set(fontes),
         "tentativas":     tentativas,
@@ -419,6 +422,7 @@ def gerar_codigo(
     nomes_ok = False
 
     melhor = None
+    diagnosticos = []
 
     consulta = pergunta
     if historico:
@@ -484,6 +488,8 @@ def gerar_codigo(
                     print(f"  ⚠️  API do Google indisponível ou limite atingido. Acionando o Ollama local ({OLLAMA_MODEL}) imediatamente...")
                     if OllamaLLM is not None:
                         llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+                        if ctx is not None:
+                            ctx.llm = llm  # persiste o fallback p/ as próximas chamadas
                     continue
                 raise
         llm_cache.salvar(llm, prompt, resposta)
@@ -500,13 +506,25 @@ def gerar_codigo(
         erros_compilacao = v["compilacao"]["erros"] or None
         erro_execucao = _descrever_falha_execucao(v["execucao"]) or None
 
+        diagnosticos.append({
+            "tentativa":          tentativa,
+            "valido":             v["valido"],
+            "alucinacoes":        sorted(v["alucinacoes"] or []),
+            "includes_errados":   v["includes"] or [],
+            "metodos_suspeitos":  [list(m) for m in (v["metodos_suspeitos"] or [])],
+            "erros_semanticos":   v["erros_semanticos"] or [],
+            "enums_invalidos":    v["enums_invalidos"] or [],
+            "erros_compilacao":   (v["compilacao"]["erros"] or [])[:10],
+            "erro_execucao":      erro_execucao,
+        })
+
         if v["valido"]:
-            return _resultado_de(v, True, fontes, tentativa)
+            return _resultado_de(v, True, fontes, tentativa, llm, diagnosticos)
 
         if nomes_ok:
             nota = 2 if v["compilacao"]["status"] == "ok" else 1
             if melhor is None or nota > nota_melhor:
-                melhor, nota_melhor = _resultado_de(v, False, fontes, tentativa), nota
+                melhor, nota_melhor = _resultado_de(v, False, fontes, tentativa, llm, diagnosticos), nota
 
         if tentativa >= MAX_RETRIES + 1:
             print("  ⚠️  Limite de tentativas atingido.")
@@ -556,7 +574,7 @@ def gerar_codigo(
             print("  ↩️  Devolvendo a melhor tentativa (nomes limpos; compilou, se alguma compilou).")
         melhor["tentativas"] = tentativa
         return melhor
-    return _resultado_de(v, False, fontes, tentativa)
+    return _resultado_de(v, False, fontes, tentativa, llm, diagnosticos)
 
 
 def obter_llm():

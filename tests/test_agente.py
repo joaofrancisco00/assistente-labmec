@@ -139,7 +139,8 @@ class TestRespostaFinalDoAgente(unittest.TestCase):
                      "includes", "includes_por_classe", "metodos_suspeitos", "enums_invalidos",
                      "compilacao", "execucao", "cmake",
                      "classes_legado", "classes_indisponiveis", "fontes_nao_api",
-                     "correcoes_automaticas", "fontes", "tentativas"}
+                     "correcoes_automaticas", "fontes", "tentativas",
+                     "modelo", "diagnosticos"}
         self.assertEqual(set(r), esperadas)
 
     def test_saida_em_partes_do_gemini_vira_texto(self):
