@@ -415,6 +415,7 @@ def gerar_codigo(
     includes_errados = None
     includes_por_classe = None
     metodos_suspeitos = None
+    erros_aridade = None
     erros_compilacao = None
     erros_semanticos = None
     enums_invalidos = None
@@ -442,6 +443,7 @@ def gerar_codigo(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
             classes_alucinadas, includes_errados, includes_por_classe,
             metodos_suspeitos, methods_whitelist,
+            erros_aridade=erros_aridade,
             erros_compilacao=erros_compilacao,
             erros_semanticos=erros_semanticos,
             enums_invalidos=enums_invalidos,
@@ -501,6 +503,7 @@ def gerar_codigo(
         includes_errados = v["includes"]
         includes_por_classe = v["includes_por_classe"]
         metodos_suspeitos = v["metodos_suspeitos"]
+        erros_aridade = v["erros_aridade"] or None
         erros_semanticos = v["erros_semanticos"]
         enums_invalidos = v["enums_invalidos"]
         erros_compilacao = v["compilacao"]["erros"] or None
@@ -512,6 +515,7 @@ def gerar_codigo(
             "alucinacoes":        sorted(v["alucinacoes"] or []),
             "includes_errados":   v["includes"] or [],
             "metodos_suspeitos":  [list(m) for m in (v["metodos_suspeitos"] or [])],
+            "erros_aridade":      v["erros_aridade"] or [],
             "erros_semanticos":   v["erros_semanticos"] or [],
             "enums_invalidos":    v["enums_invalidos"] or [],
             "erros_compilacao":   (v["compilacao"]["erros"] or [])[:10],
@@ -547,6 +551,7 @@ def gerar_codigo(
         for cls, _metodo in metodos_suspeitos or []:
             classes_reforco.add(cls)
         classes_reforco |= _classes_citadas_em_erros(erros_compilacao or [], whitelist)
+        classes_reforco |= _classes_citadas_em_erros(erros_aridade or [], whitelist)
         classes_reforco -= {d.metadata.get("classe", "") for d in h_docs}
 
         extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)

@@ -598,6 +598,40 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         self.assertIn("COMPILER", llm.prompts[1])
         self.assertIn("has no member named 'SetElasticity'", llm.prompts[1])
 
+    def test_erro_de_aridade_volta_no_prompt_do_retry(self):
+        # Regressão real do benchmark refinamento_uniforme: a chamada com
+        # aridade errada reprovava a resposta (via v["erros_aridade"]) mas o
+        # prompt do retry nunca mencionava o erro — gerar_codigo não passava
+        # erros_aridade ao _montar_prompt, e o modelo repetiu
+        # UniformRefinement(1, gmesh) nas 3 tentativas.
+        errada = ("```cpp\nTPZDarcyFlow *mat = new TPZDarcyFlow(1, 2);\n"
+                  "mat->SetConstantPermeability(1.0, 2.0);\n```\n")
+        certa = ("```cpp\nTPZDarcyFlow *mat = new TPZDarcyFlow(1, 2);\n"
+                 "mat->SetConstantPermeability(1.0);\n```\n")
+        llm = _LLMFalso(errada, certa)
+        db = _DBFalso()
+        with redirect_stdout(io.StringIO()), \
+             patch.object(pipeline, "validar_semantica", return_value=[]), \
+             patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "ok", "erros": [], "ignorados": 0}):
+            r = pipeline.gerar_codigo(
+                "material de darcy",
+                llm=llm, headers_db=db, examples_db=db,
+                whitelist={"TPZDarcyFlow"},
+                headers_whitelist={"TPZDarcyFlow.h"},
+                system_base="sistema",
+                methods_whitelist={"SetConstantPermeability"},
+                class_methods_index={"TPZDarcyFlow": {
+                    "SetConstantPermeability": {"min_args": 1, "max_args": 1}}},
+            )
+        self.assertNotIn("ARITY ERROR", llm.prompts[0])   # 1ª tentativa: nada a corrigir
+        self.assertIn("ARITY ERROR", llm.prompts[1])
+        self.assertIn("SetConstantPermeability", llm.prompts[1])
+        self.assertTrue(r["valido"])
+        self.assertEqual(r["tentativas"], 2)
+        self.assertTrue(r["diagnosticos"][0]["erros_aridade"])
+        self.assertIn("SetConstantPermeability", r["diagnosticos"][0]["erros_aridade"][0])
+
     def test_compilacao_ok_vira_selo_mais_forte(self):
         llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
         with patch.object(pipeline, "_compilar_codigo",
