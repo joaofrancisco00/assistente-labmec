@@ -78,8 +78,9 @@ prefix — `#include "Poisson/TPZMatPoisson.h"`,
 
 - **Class**: `TPZElasticity3D` — include `"Elasticity/TPZElasticity3D.h"`
 - **Constructor**: `TPZElasticity3D(int id, STATE E, STATE poisson, TPZVec<STATE> &force, ...)`
-  (the body force is a 3-entry `TPZVec` — a DIFFERENT signature from 2D)
-- **Post-processing**: `"Displacement"`, `"StressX"`, `"PrincipalStress"`
+  (the body force is a 3-entry `TPZVec` — a DIFFERENT signature from 2D;
+  there is **no** `planeStress`/`fx`/`fy` argument here)
+- **Post-processing**: `"Displacement"`, `"StressX"`, `"VonMises"`, `"PrincipalStress"`
 - 3 state variables → `val2` with 3 entries
 - **3D only** — in a 2D problem use `TPZElasticity2D`
 

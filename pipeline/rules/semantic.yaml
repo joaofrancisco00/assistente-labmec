@@ -5,6 +5,12 @@ rules:
     incompativel_com: '\bSetElasticity\b'
     aviso: "For TPZElasticity2D, always use the full constructor with 6 arguments (id, E, nu, fx, fy, planestress) and NEVER use SetElasticity(), because it does not initialize the constitutive law."
 
+  - nome: "3D Elasticity - Constructor with force vector"
+    padrao: '\bTPZElasticity3D\b'
+    requer: null
+    incompativel_com: '(?i)\bplane\s*_?(stress|strain)\b|\bSetElasticity\b'
+    aviso: "TPZElasticity3D has no planeStress/fx/fy arguments: the constructor is TPZElasticity3D(id, E, nu, TPZVec<STATE> &force) with a 3-entry force vector, and the boundary condition needs val1(3, 3) and val2 with 3 entries. Do not copy the TPZElasticity2D constructor."
+
   - nome: "Mixed Darcy - Multiphysics Mesh"
     padrao: '\bTPZMixedDarcyFlow\b|\bTPZMultiphysicsCompMesh\b'
     requer: '\bBuildMultiphysicsSpace\b'
