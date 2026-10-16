@@ -56,6 +56,7 @@ class PipelineContext:
         # import circular-safe: obter_llm está em __init__, mas só é chamado
         # em runtime (nunca no import-time do módulo).
         from . import obter_llm
+        from .retrieval import _get_reranker
 
         print("Carregando modelos e banco de dados...")
         embeddings = HuggingFaceEmbeddings(
@@ -63,6 +64,7 @@ class PipelineContext:
             encode_kwargs={"normalize_embeddings": True},
         )
         headers_db, examples_db, wiki_db = _carregar_bancos(embeddings)
+        _get_reranker()  # aquece aqui — a 1a pergunta nao paga ~9s de load
 
         ctx = cls(
             llm=obter_llm(),

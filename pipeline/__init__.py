@@ -489,7 +489,7 @@ def gerar_codigo(
                 if ("503" in erro_str or "429" in erro_str) and _api_try < _MAX_RETRIES_API:
                     print(f"  ⚠️  API do Google indisponível ou limite atingido. Acionando o Ollama local ({OLLAMA_MODEL}) imediatamente...")
                     if OllamaLLM is not None:
-                        llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+                        llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
                         if ctx is not None:
                             ctx.llm = llm  # persiste o fallback p/ as próximas chamadas
                     continue
@@ -592,7 +592,7 @@ def obter_llm():
             print("Erro: Nem o pacote do Gemini nem o do Ollama foram encontrados.")
             exit(1)
         print(f"  💻 Usando modelo local ({OLLAMA_MODEL}) via Ollama...")
-        return OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX)
+        return OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
 
 
 def main():
