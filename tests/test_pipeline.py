@@ -343,9 +343,11 @@ class TestRecuperarContexto(unittest.TestCase):
         doc_wiki_fluxo = Document(page_content="Tutorial enorme...", metadata={"tipo": "doc_fluxo", "classes_usadas": "TPZGeoMesh", "source": "tutorial.md"})
         wiki_db = MockDB(docs_mmr=[doc_wiki_fluxo, doc_wiki_teoria])
 
-        h_docs, e_docs, w_docs, fontes = pipeline._recuperar_contexto(
-            pergunta, headers_db, examples_db, wiki_db, explicativa=True
-        )
+        with patch("pipeline.retrieval._get_reranker",
+                   return_value=_RerankerFalso([10.0] * 10)):
+            h_docs, e_docs, w_docs, fontes = pipeline._recuperar_contexto(
+                pergunta, headers_db, examples_db, wiki_db, explicativa=True
+            )
 
         # Headers: garante dedup
         self.assertEqual(len(h_docs), 2)
@@ -359,6 +361,53 @@ class TestRecuperarContexto(unittest.TestCase):
         # Wiki: doc_fluxo é banido na pergunta explicativa
         self.assertEqual(len(w_docs), 1)
         self.assertEqual(w_docs[0].metadata["tipo"], "conceito")
+
+
+class _RerankerFalso:
+    """Devolve scores fixos na ordem dos pares recebidos — o que interessa é
+    o corte por min_score, não o modelo."""
+    def __init__(self, scores):
+        self.scores = scores
+
+    def predict(self, pairs):
+        return self.scores
+
+
+class TestRerankMinScore(unittest.TestCase):
+    def _doc(self, nome, meta=None):
+        from langchain_core.documents import Document
+        m = {"source": f"{nome}.h"}
+        m.update(meta or {})
+        return Document(page_content=nome, metadata=m)
+
+    def test_score_abaixo_do_minimo_e_descartado(self):
+        docs = [self._doc("a"), self._doc("b"), self._doc("c")]
+        with patch("pipeline.retrieval._get_reranker",
+                   return_value=_RerankerFalso([5.0, -3.0, 2.0])):
+            out = pipeline.retrieval._rerank_docs("pergunta", docs, top_k=3, min_score=-2.0)
+        self.assertEqual([d.page_content for d in out], ["a", "c"])
+        self.assertEqual(out[0].metadata["rerank_score"], 5.0)
+
+    def test_sem_min_score_ordena_e_corta_no_top_k(self):
+        docs = [self._doc("a"), self._doc("b"), self._doc("c")]
+        with patch("pipeline.retrieval._get_reranker",
+                   return_value=_RerankerFalso([5.0, -3.0, 2.0])):
+            out = pipeline.retrieval._rerank_docs("pergunta", docs, top_k=2)
+        self.assertEqual([d.page_content for d in out], ["a", "c"])
+
+    def test_garantido_sobrevive_sem_passar_pelo_reranker(self):
+        # garantidos entram via filter={"classe": ...} e nunca são reranqueados:
+        # mesmo com o MMR devolvendo só lixo de score baixo, eles ficam
+        garantido = self._doc("class TPZGeoMesh {};", {"classe": "TPZGeoMesh"})
+        ruido = self._doc("header irrelevante")
+        headers_db = MockDB(docs_sim=[garantido], docs_mmr=[ruido])
+        vazio = MockDB()
+        with patch("pipeline.retrieval._get_reranker",
+                   return_value=_RerankerFalso([-9.0])):
+            h_docs, e_docs, w_docs, _ = pipeline._recuperar_contexto(
+                "TPZGeoMesh malha", headers_db, vazio, vazio)
+        self.assertIn(garantido, h_docs)
+        self.assertNotIn(ruido, h_docs)
 
 
 class TestReservaDeVagasNaWiki(unittest.TestCase):

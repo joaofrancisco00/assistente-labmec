@@ -84,6 +84,11 @@ COL_WIKI     = "neopz_wiki"
 K_WIKI       = 3
 K_WIKI_CONCEITOS = 1
 
+# Score mínimo do reranker por coleção (defaults conservadores; calibrar via benchmark)
+RERANK_MIN_HEADERS  = -2.0
+RERANK_MIN_EXAMPLES = 1.0
+RERANK_MIN_WIKI     = -5.0
+
 INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
 
 HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",

@@ -8,6 +8,9 @@ from .config import (
     K_WIKI,
     K_WIKI_CONCEITOS,
     RERANKER_MODEL,
+    RERANK_MIN_HEADERS,
+    RERANK_MIN_EXAMPLES,
+    RERANK_MIN_WIKI,
 )
 from .cpp_parser import find_tpz_classes_in_code
 from sentence_transformers import CrossEncoder
@@ -23,7 +26,8 @@ def _get_reranker() -> CrossEncoder:
         _reranker_cache = CrossEncoder(RERANKER_MODEL, max_length=512)
     return _reranker_cache
 
-def _rerank_docs(pergunta: str, docs: list, top_k: int) -> list:
+def _rerank_docs(pergunta: str, docs: list, top_k: int,
+                 min_score: float = None, rotulo: str = "docs") -> list:
     if not docs:
         return []
     try:
@@ -32,9 +36,15 @@ def _rerank_docs(pergunta: str, docs: list, top_k: int) -> list:
         scores = reranker.predict(pairs)
         for i, doc in enumerate(docs):
             doc.metadata["rerank_score"] = float(scores[i])
-            
+
         scored_docs = list(zip(scores, docs))
         scored_docs.sort(key=lambda x: x[0], reverse=True)
+        if min_score is not None:
+            n_antes = len(scored_docs)
+            scored_docs = [par for par in scored_docs if par[0] >= min_score]
+            descartados = n_antes - len(scored_docs)
+            if descartados:
+                print(f"  📚 Contexto: {descartados} {rotulo} descartados (score < {min_score})")
         return [doc for score, doc in scored_docs[:top_k]]
     except Exception as e:
         print(f"  ⚠️ Erro no reranking: {e}. Usando ordem original.")
@@ -150,7 +160,8 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
         pergunta, k=pool_headers, fetch_k=pool_headers * 2
     )
     h_candidates = _boost_por_classe(_despriorizar_legado(h_pool), classes_citadas, "classe")
-    h_reranked = _rerank_docs(pergunta, h_candidates, K_HEADERS)
+    h_reranked = _rerank_docs(pergunta, h_candidates, K_HEADERS,
+                              RERANK_MIN_HEADERS, "headers")
     h_docs = _dedup_docs(garantidos + h_reranked)[:K_HEADERS]
 
     pool_examples = max(K_EXAMPLES * EXAMPLE_POOL_MULT, K_EXAMPLES)
@@ -158,7 +169,8 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
         pergunta, k=pool_examples, fetch_k=pool_examples * 2
     )
     e_candidates = _boost_por_classe(_despriorizar_legado(e_pool), classes_citadas, "classes_usadas")
-    e_docs = _rerank_docs(pergunta, e_candidates, K_EXAMPLES)
+    e_docs = _rerank_docs(pergunta, e_candidates, K_EXAMPLES,
+                          RERANK_MIN_EXAMPLES, "exemplos")
 
     w_docs = []
     if wiki_db is not None:
@@ -170,7 +182,8 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
         if explicativa or _pede_snippet_curto(pergunta):
             w_pool = [d for d in w_pool if d.metadata.get("tipo") != "doc_fluxo"]
         w_boosted = _boost_por_classe(w_pool, classes_citadas, "classes_usadas")
-        w_reranked = _rerank_docs(pergunta, w_boosted, K_WIKI * 3) # Mais folga para reserva de conceitos
+        w_reranked = _rerank_docs(pergunta, w_boosted, K_WIKI * 3,
+                                  RERANK_MIN_WIKI, "wiki") # Corte antes da reserva de conceitos
         w_docs = _reservar_vagas_conceitos(w_reranked, K_WIKI, K_WIKI_CONCEITOS)
 
     all_docs = h_docs + e_docs + w_docs
