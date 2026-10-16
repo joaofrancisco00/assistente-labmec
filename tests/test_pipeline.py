@@ -635,8 +635,8 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         # ...e agora o resultado NÃO é válido, com o erro do compilador junto
         self.assertFalse(r["valido"])
         self.assertEqual(r["compilacao"]["erros"], self.ERRO_GPP)
-        # gastou as tentativas tentando corrigir
-        self.assertEqual(r["tentativas"], pipeline.MAX_RETRIES + 1)
+        # 2ª tentativa dá diagnóstico idêntico → parada antecipada aborta o retry
+        self.assertEqual(r["tentativas"], 2)
 
     def test_erro_do_compilador_volta_no_prompt_do_retry(self):
         llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
@@ -951,6 +951,63 @@ def Document_wiki(tipo, source):
     from langchain_core.documents import Document
     return Document(page_content=f"prosa {source}",
                     metadata={"tipo": tipo, "classes_usadas": "", "source": source})
+
+
+def _gerar(pergunta, llm):
+    return pipeline.gerar_codigo(
+        pergunta,
+        llm=llm,
+        headers_db=MockDB(),
+        examples_db=MockDB(),
+        wiki_db=None,
+        whitelist={"TPZGeoMesh"},
+        headers_whitelist={"pzgmesh.h"},
+        methods_whitelist=set(),
+        class_header_index={},
+        class_methods_index={},
+        collisions={},
+        renames={},
+        legacy_classes=set(),
+        enum_values_index={},
+        system_base="system",
+    )
+
+
+_CODIGO_INVALIDO = "```cpp\nTPZClasseQueNaoExiste *x = nullptr;\n```"
+
+
+class TestRetryPorEdicao(unittest.TestCase):
+    def test_segunda_tentativa_recebe_o_codigo_anterior(self):
+        llm = _LLMFalso(_CODIGO_INVALIDO, "Resposta final sem código.")
+        resultado = _gerar("solve a problem", llm)
+        self.assertEqual(resultado["tentativas"], 2)
+        self.assertIn(_CODIGO_INVALIDO, llm.prompts[1])
+        self.assertIn("fix ONLY the flagged parts", llm.prompts[1])
+        self.assertNotIn("YOUR PREVIOUS CODE", llm.prompts[0])
+
+
+class TestParadaAntecipada(unittest.TestCase):
+    def test_diagnostico_identico_aborta_o_retry(self):
+        llm = _LLMFalso(_CODIGO_INVALIDO)
+        resultado = _gerar("solve a problem", llm)
+        self.assertEqual(resultado["tentativas"], 2)
+        self.assertEqual(len(resultado["diagnosticos"]), 2)
+
+
+class TestClassesPorIntencao(unittest.TestCase):
+    def test_vtk_sugere_class_sem_citar_nome(self):
+        classes = pipeline.retrieval._classes_por_intencao(
+            "export the solution to vtk")
+        self.assertIn("TPZVTKGenerator", classes)
+
+
+class TestSleepSoParaAPI(unittest.TestCase):
+    def test_ollama_nao_dorme_entre_retries(self):
+        OllamaLLMFalso = type("OllamaLLM", (_LLMFalso,), {})
+        llm = OllamaLLMFalso(_CODIGO_INVALIDO)
+        with patch("pipeline.time.sleep") as dormir:
+            _gerar("solve a problem", llm)
+        dormir.assert_not_called()
 
 
 if __name__ == "__main__":

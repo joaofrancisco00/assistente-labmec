@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 from .config import (
+    MAPA_INTENCAO_CLASSE,
     K_HEADERS,
     K_EXAMPLES,
     EXAMPLE_POOL_MULT,
@@ -166,9 +167,20 @@ def _buscar_cards(wiki_db, classes_citadas: set, limite: int = K_WIKI) -> list:
                                   if c.strip()})
     return docs
 
+def _classes_por_intencao(pergunta: str) -> set:
+    """Classes sugeridas pela intenção da pergunta (MAPA_INTENCAO_CLASSE) —
+    cobre o caso em que o usuário pede 'export to vtk' sem citar
+    TPZVTKGenerator pelo nome."""
+    classes = set()
+    for kw, lista in MAPA_INTENCAO_CLASSE.items():
+        if re.search(rf"\b(?:{kw})\b", pergunta, re.IGNORECASE):
+            classes.update(lista)
+    return classes
+
 def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
                         explicativa: bool = None) -> tuple:
     classes_citadas = find_tpz_classes_in_code(pergunta)
+    classes_citadas |= _classes_por_intencao(pergunta)
 
     garantidos = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_citadas, limite=K_HEADERS)
 

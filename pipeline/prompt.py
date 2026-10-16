@@ -81,6 +81,7 @@ def _montar_prompt(
     renames: dict = None,
     historico: list = None,
     destinos: set = None,
+    resposta_anterior: str = None,
 ) -> str:
     destinos = whitelist if destinos is None else destinos
 
@@ -196,7 +197,15 @@ def _montar_prompt(
             "Follow the instructions above strictly in the next answer."
         )
 
-    if instrucao_correcao:
+    if resposta_anterior and instrucao_correcao:
+        instrucao_correcao += (
+            "\n\nYOUR PREVIOUS CODE (rejected — fix ONLY the flagged parts, keep the rest):\n"
+            + resposta_anterior
+        )
+        instrucao_correcao += (
+            "\nEdit the code above: fix the flagged parts and keep everything else unchanged."
+        )
+    elif instrucao_correcao:
         instrucao_correcao += "\nRewrite the code using the correct names."
 
     return f"""{system_base}

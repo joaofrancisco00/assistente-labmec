@@ -424,6 +424,7 @@ def gerar_codigo(
 
     melhor = None
     diagnosticos = []
+    resposta_anterior = None
 
     consulta = pergunta
     if historico:
@@ -452,6 +453,7 @@ def gerar_codigo(
             renames=renames,
             historico=historico,
             destinos=whitelist_destino,
+            resposta_anterior=resposta_anterior,
         )
 
         tokens_estimados = len(prompt) // 4
@@ -498,6 +500,7 @@ def gerar_codigo(
 
         v = _verificar_resposta(resposta, **recursos, pergunta=pergunta, on_evento=on_evento)
         resposta = v["resposta"]
+        resposta_anterior = resposta  # código pós-correção: o próximo retry deve EDITAR isto
         nomes_ok = v["nomes_ok"]
         classes_alucinadas = v["alucinacoes"]
         includes_errados = v["includes"]
@@ -522,6 +525,15 @@ def gerar_codigo(
             "erro_execucao":      erro_execucao,
         })
 
+        _CAMPOS_DIAGNOSTICO = ("alucinacoes", "includes_errados", "metodos_suspeitos",
+                               "erros_aridade", "erros_semanticos", "enums_invalidos",
+                               "erros_compilacao", "erro_execucao")
+        if (tentativa > 1
+                and all(diagnosticos[-1][c] == diagnosticos[-2][c]
+                        for c in _CAMPOS_DIAGNOSTICO)):
+            print("  ⚠️  Diagnóstico idêntico ao anterior — abortando retry.")
+            break
+
         if v["valido"]:
             return _resultado_de(v, True, fontes, tentativa, llm, diagnosticos)
 
@@ -534,8 +546,9 @@ def gerar_codigo(
             print("  ⚠️  Limite de tentativas atingido.")
             break
 
-        print("  ⏳ Aguardando 3s antes de tentar novamente para poupar a API...")
-        time.sleep(3)
+        if type(llm).__name__ != "OllamaLLM":
+            print("  ⏳ Aguardando 3s antes de tentar novamente para poupar a API...")
+            time.sleep(3)
 
         classes_reforco = set()
         docs_semanticos = []

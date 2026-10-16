@@ -91,6 +91,17 @@ RERANK_MIN_WIKI     = -5.0
 
 INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
 
+# Mapa intenção→classes: palavras-chave (regex \b...\b, case-insensitive) na
+# pergunta sugerem classes NeoPZ mesmo quando o usuário não cita o nome —
+# alimenta os `garantidos`, o boost e os cards da wiki em _recuperar_contexto.
+MAPA_INTENCAO_CLASSE = {
+    r"vtk|paraview":            ["TPZVTKGenerator", "TPZLinearAnalysis"],
+    r"refine|refinement|refin": ["TPZCheckGeom", "TPZGenSpecialGrid"],
+    r"condens|schur":           ["TPZCompMeshTools", "TPZCondensedCompEl", "TPZMatRed"],
+    r"elastic|elasticity|elast": ["TPZElasticity2D", "TPZElasticity3D"],
+    r"neumann":                 ["TPZMatLoadCasesBC"],
+}
+
 HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",
                    "time.h", "float.h", "limits.h", "ctype.h", "stddef.h"}
 
