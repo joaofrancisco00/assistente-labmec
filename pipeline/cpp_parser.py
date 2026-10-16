@@ -198,12 +198,19 @@ def _extract_method_names(content: str) -> list[dict]:
             
         args_str = content[paren_open + 1:paren_close]
         min_a, max_a = _parse_arity(args_str)
-        
+        # Assinatura normalizada em uma linha, verbatim do header — anexada à
+        # msg de erro de aridade para o modelo corrigir a chamada no retry.
+        sig = f"{name}({' '.join(args_str.split())})"
+
         if name in methods:
             methods[name]["min_args"] = min(methods[name]["min_args"], min_a)
             methods[name]["max_args"] = max(methods[name]["max_args"], max_a)
+            sigs = methods[name]["sigs"]
+            if sig not in sigs and len(sigs) < 6:
+                sigs.append(sig)
         else:
-            methods[name] = {"name": name, "min_args": min_a, "max_args": max_a}
+            methods[name] = {"name": name, "min_args": min_a,
+                             "max_args": max_a, "sigs": [sig]}
             
     return list(methods.values())
 
@@ -598,8 +605,13 @@ def build_class_methods_index_from_chunks(chunks) -> dict:
             if name in existentes:
                 existentes[name]["min_args"] = min(existentes[name]["min_args"], m["min_args"])
                 existentes[name]["max_args"] = max(existentes[name]["max_args"], m["max_args"])
+                sigs = existentes[name].setdefault("sigs", [])
+                for s in m.get("sigs", []):
+                    if s not in sigs and len(sigs) < 6:
+                        sigs.append(s)
             else:
-                existentes[name] = {"min_args": m["min_args"], "max_args": m["max_args"]}
+                existentes[name] = {"min_args": m["min_args"], "max_args": m["max_args"],
+                                    "sigs": list(m.get("sigs", []))}
     return index
 
 
@@ -671,6 +683,24 @@ def _count_call_args(code: str, open_pos: int) -> int:
     return commas + 1
 
 
+def _msg_erro_aridade(cls: str, method: str, entrada: dict, call_args: int) -> str:
+    """Monta a msg de erro de aridade. Se o índice tiver `sigs` (assinaturas
+    verbatim do header), anexa — o modelo precisa ver a assinatura real para
+    corrigir a chamada no retry. Índices antigos sem `sigs` produzem a msg
+    exatamente como antes."""
+    min_args, max_args = entrada["min_args"], entrada["max_args"]
+    if min_args == max_args:
+        msg = f"{cls}::{method} expects exactly {min_args} argument(s), but got {call_args}."
+    else:
+        msg = f"{cls}::{method} expects between {min_args} and {max_args} arguments, but got {call_args}."
+    sigs = entrada.get("sigs", [])
+    if len(sigs) == 1:
+        msg += f" Signature: {sigs[0]}"
+    elif sigs:
+        msg += f" Signatures: {' | '.join(sigs[:3])}"
+    return msg
+
+
 def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None, class_methods_index: dict = None) -> tuple[list, list]:
     """
     Retorna uma lista de (variavel_ou_classe, metodo) para chamadas de método
@@ -712,17 +742,11 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
                 seen_nome.add(key)
                 suspeitos_nome.append(key)
         elif class_methods_index and cls in class_methods_index and method in class_methods_index[cls]:
-            arity = class_methods_index[cls][method]
-            min_args = arity["min_args"]
-            max_args = arity["max_args"]
+            entrada = class_methods_index[cls][method]
             call_args = _count_call_args(code, open_pos)
-            
-            if call_args < min_args or call_args > max_args:
-                if min_args == max_args:
-                    msg = f"{cls}::{method} expects exactly {min_args} argument(s), but got {call_args}."
-                else:
-                    msg = f"{cls}::{method} expects between {min_args} and {max_args} arguments, but got {call_args}."
-                
+
+            if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
+                msg = _msg_erro_aridade(cls, method, entrada, call_args)
                 if msg not in suspeitos_aridade:
                     suspeitos_aridade.append(msg)
 
@@ -740,17 +764,11 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
                 seen_nome.add(key)
                 suspeitos_nome.append(key)
         elif class_methods_index and cls in class_methods_index and method in class_methods_index[cls]:
-            arity = class_methods_index[cls][method]
-            min_args = arity["min_args"]
-            max_args = arity["max_args"]
+            entrada = class_methods_index[cls][method]
             call_args = _count_call_args(code, open_pos)
-            
-            if call_args < min_args or call_args > max_args:
-                if min_args == max_args:
-                    msg = f"{cls}::{method} expects exactly {min_args} argument(s), but got {call_args}."
-                else:
-                    msg = f"{cls}::{method} expects between {min_args} and {max_args} arguments, but got {call_args}."
-                
+
+            if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
+                msg = _msg_erro_aridade(cls, method, entrada, call_args)
                 if msg not in suspeitos_aridade:
                     suspeitos_aridade.append(msg)
 

@@ -144,6 +144,41 @@ class TestChamadasSuspeitas(unittest.TestCase):
         self.assertNotIn(("TPZGeoMeshTools", "CreateGeoMeshOnGrid"), suspeitos_nome)
 
 
+class TestAssinaturaNoErroDeAridade(unittest.TestCase):
+    CODIGO = "TPZFoo *f = nullptr;\nf->Bar(1, 2);\n"
+    METODOS = {"Bar"}
+    CLASSES = {"TPZFoo"}
+
+    def test_indice_com_sigs_anexa_assinatura(self):
+        indice = {"TPZFoo": {"Bar": {
+            "min_args": 3, "max_args": 3,
+            "sigs": ["Bar(int a, int b = 0, int c = 0)"]}}}
+        _, aridade = find_suspicious_method_calls(
+            self.CODIGO, self.METODOS, self.CLASSES, indice)
+        self.assertEqual(len(aridade), 1)
+        self.assertIn("expects exactly 3 argument(s), but got 2", aridade[0])
+        self.assertIn("Signature: Bar(int a, int b = 0, int c = 0)", aridade[0])
+
+    def test_indice_legado_sem_sigs_mantem_msg_antiga(self):
+        indice = {"TPZFoo": {"Bar": {"min_args": 3, "max_args": 3}}}
+        _, aridade = find_suspicious_method_calls(
+            self.CODIGO, self.METODOS, self.CLASSES, indice)
+        self.assertEqual(
+            aridade,
+            ["TPZFoo::Bar expects exactly 3 argument(s), but got 2."])
+
+    def test_overloads_listam_as_assinaturas(self):
+        indice = {"TPZFoo": {"Bar": {
+            "min_args": 1, "max_args": 3,
+            "sigs": ["Bar(int a)", "Bar(int a, TPZGeoMesh *g, int d = 0)"]}}}
+        codigo = "TPZFoo *f = nullptr;\nf->Bar(1, 2, 3, 4);\n"
+        _, aridade = find_suspicious_method_calls(
+            codigo, self.METODOS, self.CLASSES, indice)
+        self.assertEqual(len(aridade), 1)
+        self.assertIn("Signatures: Bar(int a) | Bar(int a, TPZGeoMesh *g, int d = 0)",
+                      aridade[0])
+
+
 class TestClassesEmComentarios(unittest.TestCase):
     def test_classe_em_comentario_nao_conta(self):
         # Regressão real: a receita de elasticidade 3D cita TPZElasticity2D num
