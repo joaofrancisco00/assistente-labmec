@@ -18,6 +18,8 @@ tags:
 
 **Invariants to check (Phase 4).** Dependency closure (no chains left unresolved / recursive dependencies resolved before assembly); shape restraints consistent with hierarchical basis (side order matching); geometric compatibility of patterns (sons partition father exactly); H(div)/H(curl) restraints under refinement (vector traces!) — is that supported/tested?
 
+**Entry points (public API).** Uniform refinement of a whole `TPZGeoMesh`: `TPZGenSpecialGrid::UniformRefinement(nUniformRefs, gmesh, dimelfordivision, allmaterial=true, matidtodivided=0)` — `Pre/TPZGenSpecialGrid.h` [repo:47]. It needs **at least 3 arguments** — the third is the dimension of the elements to divide (pass the mesh `Dimension()`, e.g. `UniformRefinement(nDiv, gmesh, dim)`); `UniformRefinement(n, gmesh)` with 2 args does not compile. One-shot alternative: `TPZCheckGeom checker(gmesh); checker.UniformRefine(nDiv);` — `Mesh/pzcheckgeom.h` [repo:56]. Manual loop (one level): iterate `gmesh->ElementVec()` collecting pointers, call `gel->Divide(subelements)` on each leaf — `Mesh/pzgeoel.h` [repo:443]; do not Divide while iterating the vector itself.
+
 **Reference anchors.** Devloo's early adaptivity papers (Devloo–Oden 1987-89 line); Demkowicz hp book (constrained approximation); Šolín et al. as contrast.
 
 Related: [[TPZGeoMesh]] · [[TPZCompMesh]] · [[shape-functions]] · [[hp-adaptivity]]
