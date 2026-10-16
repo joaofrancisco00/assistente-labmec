@@ -51,6 +51,7 @@ TIPO_MAP = {
     "code":     "doc_codigo",
     "concepts": "doc_conceito",
     "flows":    "doc_fluxo",
+    "classes":  "doc_card",
 }
 
 

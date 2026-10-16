@@ -889,5 +889,69 @@ class TestReforcoPorNomeCitadoEmErro(unittest.TestCase):
         self.assertIn("EHexahedral", llm.prompts[1])
 
 
+class TestCardsGarantidos(unittest.TestCase):
+    """Os cards de API (tipo 'doc_card') perdiam o rerank da wiki para
+    páginas de prosa e nunca entravam no contexto. Quando a pergunta cita a
+    classe pelo nome, o card é garantido no início de w_docs — fora do
+    K_WIKI, como `garantidos` faz com headers."""
+
+    def _contexto(self, pergunta, wiki_db):
+        headers_db = MockDB()
+        examples_db = MockDB()
+        with patch("pipeline.retrieval._get_reranker",
+                   return_value=_RerankerFalso([10.0] * 20)):
+            return pipeline._recuperar_contexto(
+                pergunta, headers_db, examples_db, wiki_db, explicativa=True)
+
+    def _card(self, classe):
+        from langchain_core.documents import Document
+        return Document(
+            page_content=f"# {classe} — API card",
+            metadata={"tipo": "doc_card", "classes_usadas": classe,
+                      "source": f"wiki/classes/{classe}.md"})
+
+    def test_card_entra_quando_a_pergunta_cita_a_classe(self):
+        card = self._card("TPZCondensedCompEl")
+        prosa = Document_wiki("conceito", "condensacao.md")
+        wiki_db = MockDB(docs_sim=[card], docs_mmr=[prosa])
+        _, _, w_docs, _ = self._contexto(
+            "How does TPZCondensedCompEl work?", wiki_db)
+        self.assertEqual(w_docs[0].metadata["tipo"], "doc_card")
+        self.assertIn("TPZCondensedCompEl", w_docs[0].page_content)
+
+    def test_card_nao_entra_sem_classe_citada(self):
+        card = self._card("TPZCondensedCompEl")
+        prosa = Document_wiki("conceito", "condensacao.md")
+        wiki_db = MockDB(docs_sim=[card], docs_mmr=[prosa])
+        _, _, w_docs, _ = self._contexto(
+            "What is static condensation?", wiki_db)
+        self.assertNotIn("doc_card", {d.metadata.get("tipo") for d in w_docs})
+
+    def test_card_nao_conta_no_k_wiki(self):
+        from pipeline.config import K_WIKI
+        card = self._card("TPZCondensedCompEl")
+        prosas = [Document_wiki("conceito", f"prosa{i}.md") for i in range(K_WIKI)]
+        wiki_db = MockDB(docs_sim=[card], docs_mmr=prosas)
+        _, _, w_docs, _ = self._contexto(
+            "How does TPZCondensedCompEl work?", wiki_db)
+        self.assertEqual(len(w_docs), K_WIKI + 1)
+        self.assertEqual(w_docs[0].metadata["tipo"], "doc_card")
+
+    def test_falso_positivo_de_similaridade_e_filtrado(self):
+        # similarity_search pode devolver o card de OUTRA classe — só é
+        # aceito se a classe citada constar em classes_usadas do card
+        card_outra = self._card("TPZCompMeshTools")
+        wiki_db = MockDB(docs_sim=[card_outra], docs_mmr=[])
+        _, _, w_docs, _ = self._contexto(
+            "How does TPZCondensedCompEl work?", wiki_db)
+        self.assertEqual(w_docs, [])
+
+
+def Document_wiki(tipo, source):
+    from langchain_core.documents import Document
+    return Document(page_content=f"prosa {source}",
+                    metadata={"tipo": tipo, "classes_usadas": "", "source": source})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -149,6 +149,23 @@ def _buscar_declaracoes_por_nome(headers_db, nomes: set, limite: int) -> list:
         docs.extend(next(([d] for d in hits if declaracao.search(d.page_content)), []))
     return docs
 
+def _buscar_cards(wiki_db, classes_citadas: set, limite: int = K_WIKI) -> list:
+    """Cards de API (tipo 'doc_card') garantidos quando a pergunta cita a
+    classe pelo nome — o equivalente wiki dos `garantidos` dos headers. O hit
+    só é aceito se a classe constar em `classes_usadas` do card, filtrando
+    falso positivo da busca por similaridade. Não contam no K_WIKI."""
+    docs = []
+    for classe in sorted(classes_citadas)[:limite]:
+        try:
+            hits = wiki_db.similarity_search(classe, k=2, filter={"tipo": "doc_card"})
+        except Exception:
+            hits = []
+        docs.extend(d for d in hits
+                    if classe in {c.strip() for c in
+                                  (d.metadata.get("classes_usadas", "") or "").split(",")
+                                  if c.strip()})
+    return docs
+
 def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
                         explicativa: bool = None) -> tuple:
     classes_citadas = find_tpz_classes_in_code(pergunta)
@@ -174,6 +191,10 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
 
     w_docs = []
     if wiki_db is not None:
+        # Cards das classes citadas pelo nome são garantidos: entram no
+        # início e não passam pela reserva de conceitos nem pelo corte de
+        # score — fora isso perderiam o rerank para páginas de prosa
+        cards_garantidos = _buscar_cards(wiki_db, classes_citadas)
         if explicativa is None:
             explicativa = _pergunta_e_explicativa(pergunta)
         w_pool = wiki_db.max_marginal_relevance_search(
@@ -185,6 +206,7 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
         w_reranked = _rerank_docs(pergunta, w_boosted, K_WIKI * 3,
                                   RERANK_MIN_WIKI, "wiki") # Corte antes da reserva de conceitos
         w_docs = _reservar_vagas_conceitos(w_reranked, K_WIKI, K_WIKI_CONCEITOS)
+        w_docs = _dedup_docs(cards_garantidos + w_docs)
 
     all_docs = h_docs + e_docs + w_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}
