@@ -194,6 +194,7 @@ def _recursos_validacao(ctx) -> dict:
         renames=ctx.renames or {},
         legacy_classes=ctx.legacy_classes or set(),
         enum_values_index=getattr(ctx, "enum_values_index", None) or {},
+        inheritance_index=getattr(ctx, "inheritance_index", None) or {},
         destinos=_whitelist_utilizavel(ctx.whitelist, class_header_index),
     )
 
@@ -201,7 +202,8 @@ def _recursos_validacao(ctx) -> dict:
 def _verificar_resposta(
     resposta: str, *, whitelist, headers_whitelist, methods_whitelist,
     class_header_index, class_methods_index, collisions, renames,
-    legacy_classes, destinos, enum_values_index=None, pergunta=None, on_evento=None,
+    legacy_classes, destinos, enum_values_index=None, inheritance_index=None,
+    pergunta=None, on_evento=None,
 ) -> dict:
     tem_codigo = _resposta_contem_codigo(resposta)
     correcoes_automaticas = []
@@ -213,7 +215,7 @@ def _verificar_resposta(
         resposta, correcoes_enums = _corrigir_enums_automaticamente(resposta, enum_values_index)
         correcoes_automaticas.extend(correcoes_enums)
 
-        metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
+        metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index, inheritance_index)
         resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
             resposta, metodos_suspeitos_pre_correcao, class_methods_index,
         )
@@ -232,7 +234,7 @@ def _verificar_resposta(
     if tem_codigo:
         includes_errados = _validar_includes(resposta, headers_whitelist)
         includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
-        metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index)
+        metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index, inheritance_index)
         erros_semanticos = validar_semantica(resposta, pergunta)
         enums_invalidos = _validar_enums(resposta, enum_values_index)
     else:
@@ -378,7 +380,7 @@ def gerar_codigo(
     collisions: dict = None, wiki_db=None,
     methods_whitelist: set = None, class_methods_index: dict = None,
     renames: dict = None, legacy_classes: set = None,
-    enum_values_index: dict = None,
+    enum_values_index: dict = None, inheritance_index: dict = None,
 ) -> dict:
     import difflib
 
@@ -397,6 +399,7 @@ def gerar_codigo(
         renames            = ctx.renames
         legacy_classes     = ctx.legacy_classes
         enum_values_index  = ctx.enum_values_index
+        inheritance_index  = ctx.inheritance_index
         system_base        = ctx.system_base
 
     recursos = _recursos_validacao(PipelineContext(
@@ -406,6 +409,7 @@ def gerar_codigo(
         class_methods_index=class_methods_index, collisions=collisions,
         renames=renames, legacy_classes=legacy_classes, system_base=system_base,
         enum_values_index=enum_values_index or {},
+        inheritance_index=inheritance_index or {},
     ))
     methods_whitelist = recursos["methods_whitelist"]
     renames = recursos["renames"]

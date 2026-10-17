@@ -590,6 +590,46 @@ def build_class_methods_index(base_path: Path) -> dict:
     return build_class_methods_index_from_chunks(chunks)
 
 
+# Declaração de herança: captura a lista de bases diretas (até o '{' ou ';').
+# Ex: `class TPZF : public TPZA, private TPZB<T> {` → ("TPZF", "TPZA, private TPZB<T>")
+_DECL_HERANCA_RE = re.compile(
+    r'\bclass\s+(TPZ\w+)\s*(?:final\s*)?\s*:\s*'
+    r'(?:public|private|protected)\s+([\w<>:,\s ]+)\{?')
+
+
+def _resolver_nome_base(base: str) -> str:
+    """Normaliza uma base da lista de herança: remove especificador de acesso
+    (`public TPZA` → `TPZA`), parâmetros de template (`TPZFoo<T>` → `TPZFoo`)
+    e qualificador de namespace (`NS::TPZFoo` → `TPZFoo`)."""
+    base = re.sub(r'\b(?:public|private|protected|virtual)\b', '', base).strip()
+    base = base.split('<', 1)[0].split('::')[-1].strip()
+    return base
+
+
+def build_inheritance_index(base_path: Path) -> dict:
+    """
+    Varre os .h e retorna {classe: [bases diretas]} — o grafo de herança do
+    NeoPZ. Só registra arestas DIRETAS: a resolução transitiva (ancestrais de
+    ancestrais) é feita na consulta, via BFS em _metodo_na_hierarquia — assim
+    o índice fica fiel ao que está declarado nos headers, sem duplicar arestas.
+    """
+    indice = {}
+    for h_file in base_path.rglob("*.h"):
+        try:
+            content = h_file.read_text(encoding='utf-8', errors='replace')
+        except Exception:
+            continue
+        for m in _DECL_HERANCA_RE.finditer(content):
+            cls, lista = m.group(1), m.group(2)
+            bases = [b for b in (_resolver_nome_base(b) for b in lista.split(',')) if b]
+            if bases:
+                existentes = indice.setdefault(cls, [])
+                for b in bases:
+                    if b not in existentes:
+                        existentes.append(b)
+    return indice
+
+
 def build_class_methods_index_from_chunks(chunks) -> dict:
     """Versão de build_class_methods_index para ClassChunks já parseados
     (mesma motivação de build_method_whitelist_from_chunks)."""
@@ -683,6 +723,38 @@ def _count_call_args(code: str, open_pos: int) -> int:
     return commas + 1
 
 
+_MAX_NIVEIS_HERANCA = 5
+
+
+def _metodo_na_hierarquia(cls: str, metodo: str, class_methods_index: dict,
+                          inheritance_index: dict,
+                          max_niveis: int = _MAX_NIVEIS_HERANCA) -> bool:
+    """BFS sobre inheritance_index: True se `metodo` está declarado em `cls`
+    ou em algum ancestral (direto ou transitivo, até `max_niveis` níveis).
+
+    É o que fecha o buraco da whitelist global: `an.SetForcingFunction(...)`
+    num TPZLinearAnalysis passava porque SetForcingFunction existe no NeoPZ —
+    mas na classe ERRADA (TPZAnalysis → não, TPZLinearAnalysis herda de
+    TPZAnalysis? se sim, é válido; se o método só existe em outra árvore, é
+    suspeito)."""
+    visitados = {cls}
+    fila = [cls]
+    nivel = 0
+    while fila and nivel <= max_niveis:
+        proximo_nivel = []
+        for c in fila:
+            metodos = class_methods_index.get(c)
+            if metodos and metodo in metodos:
+                return True
+            for base in inheritance_index.get(c, []):
+                if base not in visitados:
+                    visitados.add(base)
+                    proximo_nivel.append(base)
+        fila = proximo_nivel
+        nivel += 1
+    return False
+
+
 def _msg_erro_aridade(cls: str, method: str, entrada: dict, call_args: int) -> str:
     """Monta a msg de erro de aridade. Se o índice tiver `sigs` (assinaturas
     verbatim do header), anexa — o modelo precisa ver a assinatura real para
@@ -701,7 +773,7 @@ def _msg_erro_aridade(cls: str, method: str, entrada: dict, call_args: int) -> s
     return msg
 
 
-def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None, class_methods_index: dict = None) -> tuple[list, list]:
+def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None, class_methods_index: dict = None, inheritance_index: dict = None) -> tuple[list, list]:
     """
     Retorna uma lista de (variavel_ou_classe, metodo) para chamadas de método
     que:
@@ -726,6 +798,36 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
     suspeitos_aridade = []
     seen_nome = set()
 
+    def _checar(cls: str, method: str, open_pos: int):
+        key = (cls, method)
+        if method not in method_whitelist:
+            if key not in seen_nome:
+                seen_nome.add(key)
+                suspeitos_nome.append(key)
+            return
+        metodos_classe = class_methods_index.get(cls) if class_methods_index else None
+        if metodos_classe is None:
+            return  # sem índice por classe → comportamento antigo (whitelist global basta)
+        if method not in metodos_classe:
+            # O método existe no NeoPZ (whitelist global) mas NÃO nesta classe.
+            # Só é legítimo se vier de um ancestral — `an.SetForcingFunction`
+            # num TPZLinearAnalysis é válido porque herdado; na classe errada
+            # é alucinação que antes passava batida. Sem inheritance_index,
+            # mantém o comportamento antigo (não sinaliza).
+            if (inheritance_index
+                    and not _metodo_na_hierarquia(cls, method, class_methods_index,
+                                                  inheritance_index)
+                    and key not in seen_nome):
+                seen_nome.add(key)
+                suspeitos_nome.append(key)
+            return
+        entrada = metodos_classe[method]
+        call_args = _count_call_args(code, open_pos)
+        if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
+            msg = _msg_erro_aridade(cls, method, entrada, call_args)
+            if msg not in suspeitos_aridade:
+                suspeitos_aridade.append(msg)
+
     for m in _METHOD_CALL_RE.finditer(code):
         var, method = m.group(1), m.group(2)
         open_pos = m.end() - 1
@@ -736,19 +838,7 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
         # válido) ou chamada cujo "método" é na verdade o nome da classe
         if method in (cls, f"~{cls}"):
             continue
-        if method not in method_whitelist:
-            key = (cls, method)
-            if key not in seen_nome:
-                seen_nome.add(key)
-                suspeitos_nome.append(key)
-        elif class_methods_index and cls in class_methods_index and method in class_methods_index[cls]:
-            entrada = class_methods_index[cls][method]
-            call_args = _count_call_args(code, open_pos)
-
-            if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
-                msg = _msg_erro_aridade(cls, method, entrada, call_args)
-                if msg not in suspeitos_aridade:
-                    suspeitos_aridade.append(msg)
+        _checar(cls, method, open_pos)
 
     for m in _QUALIFIED_CALL_RE.finditer(code):
         cls = m.group(1)
@@ -758,18 +848,6 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
             continue  # classe já é desconhecida — isso é alucinação de classe, não de método
         if method in (cls, f"~{cls}"):
             continue
-        if method not in method_whitelist:
-            key = (cls, method)
-            if key not in seen_nome:
-                seen_nome.add(key)
-                suspeitos_nome.append(key)
-        elif class_methods_index and cls in class_methods_index and method in class_methods_index[cls]:
-            entrada = class_methods_index[cls][method]
-            call_args = _count_call_args(code, open_pos)
-
-            if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
-                msg = _msg_erro_aridade(cls, method, entrada, call_args)
-                if msg not in suspeitos_aridade:
-                    suspeitos_aridade.append(msg)
+        _checar(cls, method, open_pos)
 
     return suspeitos_nome, suspeitos_aridade

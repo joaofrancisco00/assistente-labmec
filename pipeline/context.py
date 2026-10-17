@@ -33,6 +33,7 @@ class PipelineContext:
     system_base: str
 
     enum_values_index: dict = field(default_factory=dict)
+    inheritance_index: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> PipelineContext:
@@ -46,6 +47,7 @@ class PipelineContext:
             _carregar_enum_values_index,
             _carregar_collisions,
             _carregar_headers_whitelist,
+            _carregar_inheritance_index,
             _carregar_legacy_classes,
             _carregar_methods_whitelist,
             _carregar_renames,
@@ -81,6 +83,7 @@ class PipelineContext:
             legacy_classes=_carregar_legacy_classes(),
             system_base=_carregar_system_prompt(),
             enum_values_index=_carregar_enum_values_index(),
+            inheritance_index=_carregar_inheritance_index(),
         )
         print("Pronto.\n")
         return ctx

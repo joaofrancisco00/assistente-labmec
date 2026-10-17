@@ -140,7 +140,13 @@ def _montar_prompt(
         linhas_met = []
         for classe, metodo in metodos_suspeitos:
             sugestoes = difflib.get_close_matches(metodo, methods_whitelist or set(), n=3, cutoff=0.6)
-            if sugestoes:
+            if methods_whitelist and metodo in methods_whitelist:
+                # existe no NeoPZ, mas em OUTRA classe — não nessa nem nas bases dela
+                linhas_met.append(
+                    f"  - '{classe}::{metodo}' does NOT exist on class {classe} (nor its bases). "
+                    f"'{metodo}' belongs to a different class — check the class declarations of the context."
+                )
+            elif sugestoes:
                 linhas_met.append(
                     f"  - '{classe}::{metodo}' does NOT exist in NeoPZ. Did you mean: {', '.join(sugestoes)}?"
                 )

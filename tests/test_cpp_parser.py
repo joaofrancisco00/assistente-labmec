@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.cpp_parser import (
     build_class_whitelist,
+    build_inheritance_index,
     build_tiered_class_whitelist,
     extract_classes_from_header,
     find_suspicious_method_calls,
@@ -142,6 +143,50 @@ class TestChamadasSuspeitas(unittest.TestCase):
         suspeitos_nome, _ = find_suspicious_method_calls(codigo, self.METODOS, self.CLASSES)
         self.assertIn(("TPZGeoMeshTools", "CreateRectMesh"), suspeitos_nome)
         self.assertNotIn(("TPZGeoMeshTools", "CreateGeoMeshOnGrid"), suspeitos_nome)
+
+
+class TestIndiceDeHeranca(unittest.TestCase):
+    def test_header_com_multiplas_bases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "teste.h").write_text(
+                "class TPZF : public TPZA, public TPZB {\npublic:\n    void Foo();\n};\n"
+                "class TPZG : private NS::TPZH<STATE> {\npublic:\n    void Bar();\n};\n"
+                "class TPZSemBase { public: void Baz(); };\n",
+                encoding="utf-8")
+            indice = build_inheritance_index(Path(tmp))
+        self.assertEqual(indice.get("TPZF"), ["TPZA", "TPZB"])
+        # template e namespace são resolvidos: TPZH<STATE> / NS::TPZH → TPZH
+        self.assertEqual(indice.get("TPZG"), ["TPZH"])
+        self.assertNotIn("TPZSemBase", indice)
+
+
+class TestMetodoContraHierarquia(unittest.TestCase):
+    METODOS = {"SetX", "SetX2", "SetY"}
+    CLASSES = {"TPZFilho", "TPZPai", "TPZTerceiro"}
+    INDICE_METODOS = {"TPZFilho": {"SetX": {"min_args": 1, "max_args": 1}},
+                      "TPZPai": {"SetX2": {"min_args": 1, "max_args": 1}},
+                      "TPZTerceiro": {"SetY": {"min_args": 1, "max_args": 1}}}
+    HERANCA = {"TPZFilho": ["TPZPai"]}
+
+    def test_metodo_herdado_do_pai_e_aceito(self):
+        codigo = "TPZFilho *f = nullptr;\nf->SetX2(1);\nf->SetX(1);"
+        suspeitos, _ = find_suspicious_method_calls(
+            codigo, self.METODOS, self.CLASSES, self.INDICE_METODOS, self.HERANCA)
+        self.assertEqual(suspeitos, [])
+
+    def test_metodo_de_terceira_classe_e_sinalizado(self):
+        codigo = "TPZFilho *f = nullptr;\nf->SetY(1);"
+        suspeitos, _ = find_suspicious_method_calls(
+            codigo, self.METODOS, self.CLASSES, self.INDICE_METODOS, self.HERANCA)
+        self.assertIn(("TPZFilho", "SetY"), suspeitos)
+
+    def test_sem_indice_de_heranca_comportamento_antigo(self):
+        # método existe na whitelist global mas não na classe — sem o índice
+        # de herança passa batido, como antes
+        codigo = "TPZFilho *f = nullptr;\nf->SetY(1);"
+        suspeitos, _ = find_suspicious_method_calls(
+            codigo, self.METODOS, self.CLASSES, self.INDICE_METODOS)
+        self.assertEqual(suspeitos, [])
 
 
 class TestAssinaturaNoErroDeAridade(unittest.TestCase):
