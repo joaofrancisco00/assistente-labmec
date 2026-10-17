@@ -133,6 +133,29 @@ def _exporta_vtk(resposta: str) -> bool:
 _API_CONDENSACAO = ("CreatedCondensedElements", "CondenseElements",
                     "GroupAndCondenseElements", "TPZCondensedCompEl")
 
+# API real de criação manual de malha (ver pzgmesh.h / pzgeoel.h):
+#   - nós: gmesh->NodeVec().AllocateNewElement() + NodeVec()[i].SetCoord(...)
+#     (TPZAdmChunkVector NÃO tem Append/PushBack; TPZGeoNode não tem
+#      construtor (coord, mesh) — ambos falhas observadas em produção).
+#   - elemento: gmesh->CreateGeoElement(ETriangle, nodeindexes, matid, index)
+#     com `index` (int64_t&) como parâmetro de saída — a chamada de 3
+#     argumentos não existe (erro de compilação em produção, set/2026).
+#   - "ElementVec().PushBack(new TPZTriangle)", "SetNodes(" e
+#     "TPZGeoNode(coord, mesh)" são API inventada.
+_CREATE_EL_4ARGS_RE = re.compile(r"CreateGeoElement\s*\([^;)]*,[^;)]*,[^;)]*,[^;)]*\)")
+
+
+def _sem_alocacao_manual_inventada(resposta: str) -> bool:
+    """Sem as formas inventadas de inserir nó/elemento vistas em produção:
+    NodeVec().Append(, NodeVec().PushBack(, ElementVec().PushBack(,
+    TPZGeoNode(coord, mesh) e SetNodes( (este último não existe — o que
+    existe é SetNodeIndex, mas mesmo ele só faz sentido num elemento já
+    criado pela malha)."""
+    proibidos = ("NodeVec().Append(", "NodeVec().PushBack(",
+                 "ElementVec().PushBack(", "SetNodes(")
+    return not any(p in resposta for p in proibidos)
+
+
 CASOS = [
     {
         "nome": "poisson_2d_completo",
@@ -330,6 +353,61 @@ CASOS = [
             "cita_api_real":       lambda r: any(a in r["resposta"] for a in _API_CONDENSACAO),
             "sem_receita_colada":  lambda r: _sem_receita_colada(r["resposta"]),
             "sem_alegacao_falsa":  lambda r: _sem_alegacao_de_compilacao(r["resposta"]),
+        },
+    },
+    {
+        # Falha real (ago/2026): o modelo "criava" o triângulo com
+        # `new TPZTriangle` + `gmesh->ElementVec().PushBack(triangle)` +
+        # `triangle->SetNodeIndex(...)` e nós com `TPZGeoNode(coord, *gmesh)`
+        # + `NodeVec().PushBack(&node)` — tudo API inventada. O caminho real é
+        # NodeVec().AllocateNewElement()/SetCoord + CreateGeoElement(4 args).
+        "nome": "elemento_triangulo_manual",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Generate C++ code with NeoPZ to initialize a geometric element "
+                     "of type TPZTriangle in a TPZGeoMesh geometric mesh, including "
+                     "the creation of the node(s). It does not need to be a complete program."),
+        "checks": {
+            "validacao_limpa":        lambda r: r["valido"],
+            "usa_create_geo_element": lambda r: "CreateGeoElement" in r["resposta"],
+            "elemento_com_4_args":    lambda r: _CREATE_EL_4ARGS_RE.search(r["resposta"]) is not None,
+            "sem_alocacao_inventada": lambda r: _sem_alocacao_manual_inventada(r["resposta"]),
+            "sem_api_antiga":         lambda r: not r["classes_legado"],
+            "compilou":               _compilou,
+        },
+    },
+    {
+        # Falha real (ago/2026): a lista de métodos incluía o inventado
+        # `TPZGeoEl::SetNodes`; e o snippet de exemplo compilava mal
+        # (NodeVec().Append + CreateGeoElement de 3 args — set/2026).
+        "nome": "explicar_tpzgeomesh",
+        "receita": False,
+        "pergunta": ("What is the TPZGeoMesh class for and in which header is it declared?"),
+        "checks": {
+            "validacao_limpa":        lambda r: r["valido"],
+            "cita_header":            lambda r: "pzgmesh.h" in r["resposta"],
+            "sem_alocacao_inventada": lambda r: _sem_alocacao_manual_inventada(r["resposta"]),
+            "sem_api_antiga":         lambda r: not r["classes_legado"],
+            "sem_receita_colada":     lambda r: _sem_receita_colada(r["resposta"]),
+        },
+    },
+    {
+        # Falha real (set/2026): mesmo numa pergunta conceitual, o snippet de
+        # exemplo usava `NodeVec().Append(TPZGeoNode(coord, &mesh))` e
+        # `CreateGeoElement(EQuadrilateral, nodeIndexes, 1)` — sem o `index`
+        # de saída. Reprovou 3x na compilação.
+        "nome": "nos_na_malha_manual",
+        "receita": False,
+        "pergunta": ("Show a short NeoPZ snippet that adds four nodes to an empty "
+                     "TPZGeoMesh and creates a quadrilateral geometric element "
+                     "over them."),
+        "checks": {
+            "validacao_limpa":        lambda r: r["valido"],
+            "compilou":               _compilou,
+            "usa_api_real_nos":       lambda r: ("AllocateNewElement" in r["resposta"]
+                                                  or "SetCoord" in r["resposta"]),
+            "elemento_com_4_args":    lambda r: _CREATE_EL_4ARGS_RE.search(r["resposta"]) is not None,
+            "sem_alocacao_inventada": lambda r: _sem_alocacao_manual_inventada(r["resposta"]),
         },
     },
 ]
