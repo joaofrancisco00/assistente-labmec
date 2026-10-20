@@ -15,9 +15,7 @@ def _resposta_contem_codigo(resposta: str) -> bool:
         return True
     if re.search(r'\bnew\s+TPZ\w+', resposta):
         return True
-    if re.search(r'\bTPZ\w+\s*[\*&]?\s*\w+\s*[=;(]', resposta):
-        return True
-    return False
+    return bool(re.search(r'\bTPZ\w+\s*[\*&]?\s*\w+\s*[=;(]', resposta))
 
 def _validar_codigo(codigo: str, whitelist: set) -> list:
     if not whitelist:

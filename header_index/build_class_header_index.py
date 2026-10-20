@@ -87,10 +87,7 @@ def find_template_spans(text: str):
 
 
 def in_any_span(pos: int, spans) -> bool:
-    for s, e in spans:
-        if s <= pos < e:
-            return True
-    return False
+    return any(s <= pos < e for s, e in spans)
 
 
 def scan_to_terminator(text: str, start: int):
@@ -223,7 +220,7 @@ def build_index(root: str):
             continue
 
         text = strip_comments(raw)
-        for name, kind, is_def in extract_declarations(text) + extract_alias_declarations(text):
+        for name, _kind, is_def in extract_declarations(text) + extract_alias_declarations(text):
             if is_def:
                 definitions[name].add(relpath)
             else:

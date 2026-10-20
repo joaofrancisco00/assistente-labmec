@@ -444,7 +444,8 @@ def gerar_codigo(
 
         contexto = _formatar_contexto(h_docs, e_docs, w_docs)
 
-        prompt = _montar_prompt(
+    nota_melhor = 0
+        prompt_txt = _montar_prompt(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
             classes_alucinadas, includes_errados, includes_por_classe,
             metodos_suspeitos, methods_whitelist,
@@ -460,12 +461,12 @@ def gerar_codigo(
             resposta_anterior=resposta_anterior,
         )
 
-        tokens_estimados = len(prompt) // 4
+        tokens_estimados = len(prompt_txt) // 4
         if type(llm).__name__ == "OllamaLLM" and tokens_estimados > int(NUM_CTX * 0.9):
             print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
         _MAX_RETRIES_API = 2
-        resposta = llm_cache.buscar(llm, prompt)
+        resposta = llm_cache.buscar(llm, prompt_txt)
         if resposta is not None:
             print("  💾 Resposta do LLM veio do cache")
             _emitir(on_evento, "token", resposta)
@@ -474,7 +475,7 @@ def gerar_codigo(
                 break
             try:
                 pedacos = []
-                for pedaco in llm.stream(prompt):
+                for pedaco in llm.stream(prompt_txt):
                     texto = pedaco.content if hasattr(pedaco, "content") else pedaco
                     if isinstance(texto, list):
                         texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
@@ -484,7 +485,7 @@ def gerar_codigo(
                 resposta = "".join(pedacos)
                 break
             except (AttributeError, NotImplementedError):
-                ret = llm.invoke(prompt)
+                ret = llm.invoke(prompt_txt)
                 texto = ret.content if hasattr(ret, "content") else ret
                 if isinstance(texto, list):
                     texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
@@ -500,7 +501,7 @@ def gerar_codigo(
                             ctx.llm = llm  # persiste o fallback p/ as próximas chamadas
                     continue
                 raise
-        llm_cache.salvar(llm, prompt, resposta)
+        llm_cache.salvar(llm, prompt_txt, resposta)
 
         v = _verificar_resposta(resposta, **recursos, pergunta=pergunta, on_evento=on_evento)
         resposta = v["resposta"]

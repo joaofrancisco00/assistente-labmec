@@ -26,10 +26,8 @@ import sys
 import time
 from pathlib import Path
 
-import pipeline
 from pipeline import (
-    EMBED_MODEL, NUM_CTX, OLLAMA_MODEL, TEMPERATURE,
-    HuggingFaceEmbeddings, OllamaLLM, gerar_codigo, obter_llm,
+    gerar_codigo,
 )
 
 # ── Casos de benchmark ─────────────────────────────────────────────────────────

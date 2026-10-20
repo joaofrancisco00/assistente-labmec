@@ -18,10 +18,8 @@ import re
 import sys
 from pathlib import Path
 
-import pipeline
 from pipeline import (
-    EMBED_MODEL, NUM_CTX, OLLAMA_MODEL, TEMPERATURE,
-    HuggingFaceEmbeddings, OllamaLLM, gerar_codigo, obter_llm,
+    OLLAMA_MODEL, gerar_codigo,
 )
 
 # ── Casos de benchmark ─────────────────────────────────────────────────────────

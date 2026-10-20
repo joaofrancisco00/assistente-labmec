@@ -1,0 +1,37 @@
+#!/bin/bash
+# Pre-commit hook: lint (ruff) + testes unitários.
+# Se qualquer etapa falhar, o commit é abortado.
+# Instalar com: cp tools/pre-commit .git/hooks/pre-commit
+
+echo "============================================="
+echo "Rodando lint (ruff check)..."
+echo "============================================="
+
+uv run ruff check .
+RESULT=$?
+
+if [ $RESULT -ne 0 ]; then
+    echo "============================================="
+    echo "❌ ERRO: Lint falhou!"
+    echo "Corrija os erros apontados pelo ruff antes de commitar."
+    echo "============================================="
+    exit 1
+fi
+
+echo "============================================="
+echo "Rodando testes unitários rápidos (sem IA)..."
+echo "============================================="
+
+uv run python -m unittest discover -s tests -v
+RESULT=$?
+
+if [ $RESULT -ne 0 ]; then
+    echo "============================================="
+    echo "❌ ERRO: Testes unitários falharam!"
+    echo "Por favor, corrija os erros de código antes de commitar."
+    echo "============================================="
+    exit 1
+fi
+
+echo "✅ Lint e testes passaram! Commit liberado."
+exit 0

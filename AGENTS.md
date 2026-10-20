@@ -2,6 +2,8 @@
 
 ## Verification commands
 
+- Lint (also run by the pre-commit hook): `uv run ruff check .`
+  The hook can be installed with `cp tools/pre-commit .git/hooks/pre-commit`.
 - Unit tests (also run by the pre-commit hook): `uv run python -m unittest discover -s tests`
 - Build the reference recipes against the local NeoPZ install:
   ```bash

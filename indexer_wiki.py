@@ -110,7 +110,7 @@ def _carregar_documentos() -> list:
     # ── Deliverables (ignorados na Fase 1, exceto se adicionarmos exceções no futuro)
     # Todos os relatórios pesados na raiz (ex: NEOPZ_TECHNICAL_ASSESSMENT.md)
     # foram removidos do índice do RAG porque poluíam o pool com texto acadêmico.
-    print(f"  Deliverables raiz ignorados (apenas para leitura humana).")
+    print("  Deliverables raiz ignorados (apenas para leitura humana).")
 
     return docs
 

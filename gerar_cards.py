@@ -108,7 +108,6 @@ def extrair_publicos(linhas: list, nome: str) -> list:
     # 2) junta declarações multi-linha: acumula até ';'
     decls = []
     buf = ""
-    prof_interno = 0    # chaves dentro de uma declaração (corpo inline, enum...)
     def _flush(buf):
         """Emite as declarações de `buf` (pode haver mais de uma por linha)."""
         for parte in re.sub(r"\s+", " ", buf).split(";"):

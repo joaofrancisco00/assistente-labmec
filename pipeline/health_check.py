@@ -77,7 +77,7 @@ def _analyze_collection(collection_name, embeddings, index_dir):
 def run_health_check(embeddings, index_dir: Path, log_dir: Path) -> list:
     """Roda a análise de sanidade nas coleções e salva o resultado no diretório de logs.
     Retorna a lista de anomalias encontradas."""
-    print(f"\n🩺 Iniciando Health Check do Banco de Dados...")
+    print("\n🩺 Iniciando Health Check do Banco de Dados...")
     all_inefficient = []
     
     for col in ["neopz_headers", "neopz_examples", "neopz_wiki"]:

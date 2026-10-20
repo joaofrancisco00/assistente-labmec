@@ -20,15 +20,9 @@ from pathlib import Path
 
 import gradio as gr
 
-import pipeline
 from pipeline import (
-    OLLAMA_MODEL,
-    NUM_CTX,
-    TEMPERATURE,
-    EMBED_MODEL,
     gerar_codigo,
     _registrar_interacao,
-    obter_llm,
 )
 from pipeline.agent import gerar_codigo_agente
 

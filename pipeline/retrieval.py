@@ -14,13 +14,15 @@ from .config import (
     RERANK_MIN_WIKI,
 )
 from .cpp_parser import find_tpz_classes_in_code
-from sentence_transformers import CrossEncoder
 
 _reranker_cache = None
 
-def _get_reranker() -> CrossEncoder:
+def _get_reranker():
     global _reranker_cache
     if _reranker_cache is None:
+        # import tardio: sentence_transformers pesa ~5s para carregar e só é
+        # necessária se o reranker for de fato usado
+        from sentence_transformers import CrossEncoder
         print(f"  [Reranker] Carregando modelo Cross-Encoder ({RERANKER_MODEL})...")
         import logging
         logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
@@ -38,7 +40,7 @@ def _rerank_docs(pergunta: str, docs: list, top_k: int,
         for i, doc in enumerate(docs):
             doc.metadata["rerank_score"] = float(scores[i])
 
-        scored_docs = list(zip(scores, docs))
+        scored_docs = list(zip(scores, docs, strict=True))
         scored_docs.sort(key=lambda x: x[0], reverse=True)
         if min_score is not None:
             n_antes = len(scored_docs)

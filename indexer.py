@@ -358,7 +358,7 @@ def main():
     )
     if anomalies:
         print(f"\n⚠️  Aviso: O Health Check detectou {len(anomalies)} chunks ineficientes/lixo no banco vetorial.")
-        print(f"   Verifique o relatório detalhado em: logs/chroma_health.json")
+        print("   Verifique o relatório detalhado em: logs/chroma_health.json")
     else:
         print("\n✅ Saúde do banco de dados vetorial aprovada! Nenhum lixo detectado.")
 
