@@ -224,6 +224,75 @@ class TestAssinaturaNoErroDeAridade(unittest.TestCase):
                       aridade[0])
 
 
+class TestAridadeConstrutores(unittest.TestCase):
+    """Caso real do benchmark: TPZManVector<REAL,3> v(1., 2., 3.) só era
+    recusado pelo g++ — o construtor mora no índice sob o nome da própria
+    classe e a aridade da chamada pode ser comparada antes do retry."""
+    METODOS = {"Print"}
+    CLASSES = {"TPZManVector", "TPZElasticity2D", "TPZGeoMesh", "TPZGeoQuad"}
+    INDICE = {
+        "TPZManVector": {"TPZManVector": {
+            "min_args": 0, "max_args": 2,
+            "sigs": ["TPZManVector(const int64_t size = 0)",
+                     "TPZManVector(const int64_t size, const T& copy)"]}},
+        "TPZElasticity2D": {"TPZElasticity2D": {"min_args": 1, "max_args": 6}},
+        "TPZGeoMesh": {"TPZGeoMesh": {"min_args": 0, "max_args": 0}},
+    }
+
+    def _aridade(self, codigo, indice=None):
+        _, aridade = find_suspicious_method_calls(
+            codigo, self.METODOS, self.CLASSES,
+            self.INDICE if indice is None else indice)
+        return aridade
+
+    def test_ctor_stack_com_args_a_mais_e_flagado(self):
+        aridade = self._aridade("TPZManVector<REAL,3> v(1., 2., 3.);")
+        self.assertEqual(len(aridade), 1)
+        self.assertIn("TPZManVector::TPZManVector", aridade[0])
+        self.assertIn("got 3", aridade[0])
+        self.assertIn("TPZManVector(const int64_t size, const T& copy)", aridade[0])
+
+    def test_ctor_stack_com_args_validos_passa(self):
+        self.assertEqual(self._aridade("TPZManVector<REAL,3> v(3, 0.);"), [])
+
+    def test_ctor_new_dentro_da_faixa_passa(self):
+        codigo = "auto *mat = new TPZElasticity2D(1, 1000., 0.3, 0., 0., 1);"
+        self.assertEqual(self._aridade(codigo), [])
+
+    def test_ctor_new_com_args_a_mais_e_flagado(self):
+        codigo = "auto *mat = new TPZElasticity2D(1, 1000., 0.3, 0., 0., 1, 7);"
+        self.assertEqual(len(self._aridade(codigo)), 1)
+
+    def test_definicao_de_funcao_nao_e_ctor(self):
+        # TPZGeoMesh CriarMalha(int n) { é função retornando a classe por
+        # valor — o '(' dela não é chamada de construtor (e aqui min=max=0
+        # faria QUALQUER arg flagar, se o skip falhasse)
+        codigo = "TPZGeoMesh CriarMalha(int n) {\n    return TPZGeoMesh();\n}"
+        self.assertEqual(self._aridade(codigo), [])
+
+    def test_classe_fora_da_whitelist_nao_e_checada(self):
+        codigo = "TPZFooInexistente v(1, 2, 3);"
+        self.assertEqual(self._aridade(codigo), [])
+
+    def test_classe_sem_construtor_no_indice_passa(self):
+        indice = {"TPZGeoMesh": {"Print": {"min_args": 0, "max_args": 1}}}
+        self.assertEqual(self._aridade("TPZGeoMesh g(1, 2, 3);", indice), [])
+
+    def test_ctor_qualificado_com_args_a_mais_e_flagado(self):
+        # Forma que a correção automática de namespaces escreve:
+        # `pzgeom::TPZGeoQuad q(...)` — o ':' no lookbehind não pode blindar
+        indice = {"TPZGeoQuad": {"TPZGeoQuad": {"min_args": 0, "max_args": 3}}}
+        aridade = self._aridade("pzgeom::TPZGeoQuad q(1, 2, 3, 4, 5);", indice)
+        self.assertEqual(len(aridade), 1)
+        self.assertIn("TPZGeoQuad::TPZGeoQuad", aridade[0])
+        self.assertIn("got 5", aridade[0])
+
+    def test_ctor_qualificado_com_args_validos_passa(self):
+        indice = {"TPZGeoQuad": {"TPZGeoQuad": {"min_args": 0, "max_args": 3}}}
+        self.assertEqual(
+            self._aridade("pzgeom::TPZGeoQuad q(nodes, 1, gmesh);", indice), [])
+
+
 class TestClassesEmComentarios(unittest.TestCase):
     def test_classe_em_comentario_nao_conta(self):
         # Regressão real: a receita de elasticidade 3D cita TPZElasticity2D num

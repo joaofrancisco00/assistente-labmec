@@ -482,6 +482,38 @@ def build_enum_values_index(base_path: Path) -> dict:
     return indice
 
 
+def build_class_namespace_index(base_path: Path) -> dict:
+    """Varre os .h e retorna {classe: "namespace"} para as classes TPZ que
+    vivem DENTRO de um namespace (pzgeom::TPZGeoQuad, pzshape::TPZShapeQuad,
+    etc) — o modelo escreve o nome pelado e o g++ responde "'TPZGeoQuad' was
+    not declared; did you mean 'pzgeom::TPZGeoQuad'".
+
+    Uma classe só entra se TODAS as suas declarações estiverem no MESMO
+    namespace: quem aparece no escopo global ("") ou em dois namespaces
+    (ex: TPZGeoMesh — declarada globalmente e como forward-decl dentro de
+    pzinternal) é ambígua e fica de fora — na dúvida, não corrigir é o lado
+    seguro.
+    """
+    namespaces_por_classe: dict = {}
+    for h_file in base_path.rglob("*.h"):
+        if _eh_legado(h_file):
+            continue
+        try:
+            content = h_file.read_text(encoding='utf-8', errors='replace')
+        except Exception:
+            continue
+        # _escopos pega class/struct/namespace — só os de namespace interessam
+        escopos = [(a, f, n) for a, f, n in _escopos(content)
+                   if re.search(r'\bnamespace\s+' + re.escape(n) + r'\b',
+                                content[max(0, a - 80):a + 1])]
+        for m in re.finditer(r'\b(?:class|struct)\s+(TPZ\w+)\b', content):
+            q = _qualificar(m.group(1), m.start(), escopos)
+            ns = q.rsplit("::", 1)[0] if "::" in q else ""
+            namespaces_por_classe.setdefault(m.group(1), set()).add(ns)
+    return {cls: nss.pop() for cls, nss in namespaces_por_classe.items()
+            if len(nss) == 1 and nss != {""}}
+
+
 _USO_ENUM_RE = re.compile(r'(?<![\w:])(?=([A-Za-z_]\w*)\s*::\s*([A-Za-z_]\w*)\b)')
 
 
@@ -675,6 +707,22 @@ _BIND_AUTO_NEW_RE = re.compile(r'\bauto\s*[\*&]?\s*(\w+)\s*=\s*new\s+(TPZ\w+)\s*
 _METHOD_CALL_RE = re.compile(r'\b(\w+)\s*(?:->|\.)\s*([A-Za-z_]\w*)\s*\(')
 _QUALIFIED_CALL_RE = re.compile(r'\b(TPZ\w+)::([A-Za-z_]\w*)\s*\(')
 
+# Chamadas de CONSTRUTOR: `new TPZFoo(...)` e declaração em stack
+# `TPZFoo<...> var(...)`. Construtores ficam no class_methods_index sob o
+# próprio nome da classe (ex: index["TPZManVector"]["TPZManVector"]) — caso
+# real do benchmark: `TPZManVector<REAL,3> v(1., 2., 3.)` compilava só para
+# o g++ recusar com "no matching function", erro que a checagem por índice
+# pega antes de gastar uma tentativa.
+_CTOR_NEW_RE   = re.compile(r'\bnew\s+(TPZ\w+)\s*(?:<[^;{}()]*>)?\s*\(')
+# ':' liberado de propósito no lookbehind: a declaração qualificada
+# `pzgeom::TPZGeoQuad q(...)` — que o próprio pipeline passa a escrever via
+# correção de namespaces — também é chamada de construtor e deve ser checada.
+_CTOR_STACK_RE = re.compile(r'(?<![\w.>])(TPZ\w+)\s*(?:<[^;{}()]*>)?\s+(\w+)\s*\(')
+# Depois do ')' de `TPZFoo NomeDaFuncao(...) {` vem '{' (opcionalmente com
+# 'const'): é definição de função que retorna a classe por valor, não
+# construção de variável — não pode ser checada contra a aridade do ctor.
+_CTOR_TAIL_DEF_RE = re.compile(r'\s*(?:const\s*)?\{')
+
 
 def _bind_variables_to_classes(code: str) -> dict:
     """
@@ -773,6 +821,42 @@ def _msg_erro_aridade(cls: str, method: str, entrada: dict, call_args: int) -> s
     return msg
 
 
+def _checar_construtores(code: str, class_whitelist: set, class_methods_index: dict,
+                         suspeitos_aridade: list) -> None:
+    """Checa a aridade de chamadas de construtor (`new TPZFoo(...)` e
+    `TPZFoo var(...)`) contra a entrada do próprio nome da classe no
+    class_methods_index. Acrescenta mensagens a `suspeitos_aridade`."""
+    if not class_methods_index:
+        return
+
+    def _checar_ctor(cls: str, open_pos: int):
+        if cls not in class_whitelist:
+            return  # classe desconhecida — isso é alucinação de classe
+        entrada = class_methods_index.get(cls, {}).get(cls)
+        if entrada is None:
+            return  # sem construtor declarado no índice — nada a comparar
+        call_args = _count_call_args(code, open_pos)
+        if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
+            msg = _msg_erro_aridade(cls, cls, entrada, call_args)
+            if msg not in suspeitos_aridade:
+                suspeitos_aridade.append(msg)
+
+    for m in _CTOR_NEW_RE.finditer(code):
+        _checar_ctor(m.group(1), m.end() - 1)
+
+    for m in _CTOR_STACK_RE.finditer(code):
+        cls, var = m.group(1), m.group(2)
+        open_pos = m.end() - 1
+        if var == "main":
+            continue
+        close_pos = _scan_matching_paren(code, open_pos)
+        if close_pos == -1:
+            continue
+        if _CTOR_TAIL_DEF_RE.match(code, close_pos + 1):
+            continue  # definição de função retornando a classe, não um ctor
+        _checar_ctor(cls, open_pos)
+
+
 def find_suspicious_method_calls(code: str, method_whitelist: set, class_whitelist: set = None, class_methods_index: dict = None, inheritance_index: dict = None) -> tuple[list, list]:
     """
     Retorna uma lista de (variavel_ou_classe, metodo) para chamadas de método
@@ -849,5 +933,8 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
         if method in (cls, f"~{cls}"):
             continue
         _checar(cls, method, open_pos)
+
+    _checar_construtores(code, class_whitelist, class_methods_index,
+                         suspeitos_aridade)
 
     return suspeitos_nome, suspeitos_aridade

@@ -9,7 +9,12 @@ from .config import (
     CUTOFF_ENUM_AUTOMATICO,
     INCLUDES_LIXO_CONHECIDOS,
 )
-from .validation import _motivo_indisponivel, _include_para_header
+from .compilation import _BLOCO_CODIGO_RE
+from .validation import (
+    _motivo_indisponivel,
+    _include_para_header,
+    _validar_namespaces,
+)
 
 def _sugerir_correcoes(alucinadas: list, whitelist: set, cutoff: float = 0.6) -> dict:
     sugestoes = {}
@@ -54,6 +59,27 @@ def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict
         if n:
             correcoes.append(f"{errada} → {certa}{sufixo}")
     return codigo, correcoes
+
+def _corrigir_namespaces_automaticamente(codigo: str, namespace_index: dict) -> tuple:
+    """Qualifica as classes que _validar_namespaces flagou (`TPZGeoQuad` →
+    `pzgeom::TPZGeoQuad`) — só dentro dos blocos de código fenced: a prosa
+    pode citar o nome da classe à vontade. A correção é determinística (o
+    índice garante namespace único), então não há candidato ambíguo."""
+    faltando = _validar_namespaces(codigo, namespace_index)
+    if not faltando:
+        return codigo, []
+
+    def _corrigir_bloco(m):
+        bloco = m.group(0)
+        for classe, ns in faltando.items():
+            bloco = re.sub(r'(?<![\w:])' + re.escape(classe) + r'\b',
+                           f'{ns}::{classe}', bloco)
+        return bloco
+
+    corrigido = _BLOCO_CODIGO_RE.sub(_corrigir_bloco, codigo)
+    correcoes = [f"{c} → {ns}::{c}" for c, ns in faltando.items()]
+    return corrigido, correcoes
+
 
 def _corrigir_metodos_automaticamente(codigo: str, metodos_suspeitos: list, class_methods_index: dict) -> tuple:
     if not class_methods_index or not metodos_suspeitos:

@@ -2,7 +2,12 @@ import difflib
 import re
 from pathlib import Path
 
-from .cpp_parser import find_enum_value_uses, find_tpz_classes_in_code, find_suspicious_method_calls
+from .cpp_parser import (
+    find_enum_value_uses,
+    find_tpz_classes_in_code,
+    find_suspicious_method_calls,
+    remover_comentarios,
+)
 from .config import (
     HEADERS_SISTEMA,
 )
@@ -131,6 +136,28 @@ def _validar_enums(codigo: str, enum_index: dict) -> dict:
         invalidos[f"{enum}::{valor}"] = {"enum": enum, "validos": enum_index[enum],
                                          "existe_em": onde_existe}
     return invalidos
+
+
+def _validar_namespaces(codigo: str, namespace_index: dict) -> dict:
+    """{classe: namespace} das classes usadas SEM qualificação cujo índice
+    diz que vivem num namespace (ex: TPZGeoQuad → pzgeom). Uso qualificado
+    (`pzgeom::TPZGeoQuad`) ou `using namespace pzgeom;` já resolvem — a
+    classe só vira problema se aparecer "pelada" em código (comentários não
+    contam, como no resto da validação)."""
+    if not namespace_index:
+        return {}
+    fonte = remover_comentarios(_extrair_blocos_codigo(codigo) or codigo)
+    usadas = set(re.findall(r'\bTPZ[A-Z]\w+', fonte))
+    faltando = {}
+    for classe in usadas:
+        ns = namespace_index.get(classe)
+        if not ns:
+            continue
+        if re.search(r'\busing\s+namespace\s+' + re.escape(ns) + r'\s*;', fonte):
+            continue
+        if re.search(r'(?<![\w:])' + re.escape(classe) + r'\b', fonte):
+            faltando[classe] = ns
+    return faltando
 
 
 _MAX_VALORES_ENUM = 20

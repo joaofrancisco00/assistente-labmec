@@ -681,6 +681,32 @@ class TestCompilacaoNoLoop(unittest.TestCase):
         self.assertTrue(r["diagnosticos"][0]["erros_aridade"])
         self.assertIn("SetConstantPermeability", r["diagnosticos"][0]["erros_aridade"][0])
 
+    def test_erro_de_aridade_de_construtor_entra_no_resultado(self):
+        # Caso real do benchmark: TPZManVector<REAL,3> v(1., 2., 3.) — o
+        # construtor mora no índice sob o nome da própria classe, e a
+        # verificação tem de reprovar a resposta SEM precisar do g++
+        resposta = ("Segue:\n\n```cpp\nTPZManVector<REAL,3> v(1., 2., 3.);\n```\n")
+        with redirect_stdout(io.StringIO()), \
+             patch.object(pipeline, "validar_semantica", return_value=[]):
+            v = pipeline._verificar_resposta(
+                resposta,
+                whitelist={"TPZManVector"},
+                headers_whitelist=set(),
+                methods_whitelist={"Print"},
+                class_header_index={},
+                class_methods_index={"TPZManVector": {"TPZManVector": {
+                    "min_args": 0, "max_args": 2,
+                    "sigs": ["TPZManVector(const int64_t size = 0)",
+                             "TPZManVector(const int64_t size, const T& copy)"]}}},
+                collisions={}, renames={}, legacy_classes=set(),
+                destinos={"TPZManVector"},
+            )
+        self.assertEqual(len(v["erros_aridade"]), 1)
+        self.assertIn("TPZManVector::TPZManVector", v["erros_aridade"][0])
+        self.assertIn("got 3", v["erros_aridade"][0])
+        self.assertFalse(v["nomes_ok"])
+        self.assertFalse(v["valido"])
+
     def test_compilacao_ok_vira_selo_mais_forte(self):
         llm = _LLMFalso(self.RESPOSTA_QUE_NAO_COMPILA)
         with patch.object(pipeline, "_compilar_codigo",

@@ -34,6 +34,7 @@ from pipeline.cpp_parser import (
     build_method_whitelist_from_chunks,
     build_class_methods_index_from_chunks,
     build_enum_values_index,
+    build_class_namespace_index,
 )
 
 # ── Configurações ──────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ HEADERS_WHITELIST_FILE  = INDEX_DIR / "headers_whitelist.txt"
 METHODS_WHITELIST_FILE  = INDEX_DIR / "methods_whitelist.txt"
 CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
 ENUM_VALUES_INDEX_FILE  = INDEX_DIR / "enum_values_index.json"
+CLASS_NAMESPACE_INDEX_FILE = INDEX_DIR / "class_namespace_index.json"
 EMBED_MODEL            = "BAAI/bge-base-en-v1.5"
 
 # Nomes das coleções no ChromaDB (não mudar depois de indexado)
@@ -307,6 +309,23 @@ def _gerar_whitelist(chunks_por_arquivo: dict):
         print(f"  ✅ {len(class_methods)} classes mapeadas em class_methods_index.json")
 
     _gerar_indice_enums()
+    _gerar_indice_namespaces()
+
+
+def _gerar_indice_namespaces():
+    namespaces = build_class_namespace_index(BASE_DIR)
+    if not namespaces:
+        print("  ⚠️  Índice classe→namespace vazio.")
+        return
+    INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    CLASS_NAMESPACE_INDEX_FILE.write_text(
+        json.dumps(namespaces, indent=2, sort_keys=True, ensure_ascii=False), encoding='utf-8')
+    por_ns = {}
+    for ns in namespaces.values():
+        por_ns[ns] = por_ns.get(ns, 0) + 1
+    print(f"  ✅ {len(namespaces)} classes em {len(por_ns)} namespaces "
+          f"({', '.join(f'{n}: {c}' for n, c in sorted(por_ns.items()))}) "
+          "em class_namespace_index.json")
 
 
 def _gerar_indice_enums():
@@ -334,6 +353,10 @@ def main():
 
     if "--so-enums" in sys.argv:
         _gerar_indice_enums()
+        return
+
+    if "--so-namespaces" in sys.argv:
+        _gerar_indice_namespaces()
         return
 
     chunks_por_arquivo = _parsear_headers()

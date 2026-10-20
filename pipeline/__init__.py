@@ -84,6 +84,7 @@ from .validation import (
     _validar_metodos,
     _validar_enums,
     _descrever_enum_invalido,
+    _validar_namespaces,
 )
 
 from .correction import (
@@ -93,6 +94,7 @@ from .correction import (
     _corrigir_metodos_automaticamente,
     _corrigir_includes_automaticamente,
     _corrigir_enums_automaticamente,
+    _corrigir_namespaces_automaticamente,
 )
 
 from .compilation import (
@@ -195,6 +197,7 @@ def _recursos_validacao(ctx) -> dict:
         legacy_classes=ctx.legacy_classes or set(),
         enum_values_index=getattr(ctx, "enum_values_index", None) or {},
         inheritance_index=getattr(ctx, "inheritance_index", None) or {},
+        class_namespace_index=getattr(ctx, "class_namespace_index", None) or {},
         destinos=_whitelist_utilizavel(ctx.whitelist, class_header_index),
     )
 
@@ -203,7 +206,7 @@ def _verificar_resposta(
     resposta: str, *, whitelist, headers_whitelist, methods_whitelist,
     class_header_index, class_methods_index, collisions, renames,
     legacy_classes, destinos, enum_values_index=None, inheritance_index=None,
-    pergunta=None, on_evento=None,
+    class_namespace_index=None, pergunta=None, on_evento=None,
 ) -> dict:
     tem_codigo = _resposta_contem_codigo(resposta)
     correcoes_automaticas = []
@@ -211,6 +214,10 @@ def _verificar_resposta(
         resposta, correcoes_classes = _corrigir_classes_automaticamente(
             resposta, whitelist, renames, destinos=destinos)
         correcoes_automaticas.extend(correcoes_classes)
+
+        resposta, correcoes_namespaces = _corrigir_namespaces_automaticamente(
+            resposta, class_namespace_index)
+        correcoes_automaticas.extend(correcoes_namespaces)
 
         resposta, correcoes_enums = _corrigir_enums_automaticamente(resposta, enum_values_index)
         correcoes_automaticas.extend(correcoes_enums)
@@ -237,6 +244,7 @@ def _verificar_resposta(
         metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index, inheritance_index)
         erros_semanticos = validar_semantica(resposta, pergunta)
         enums_invalidos = _validar_enums(resposta, enum_values_index)
+        namespaces_faltando = _validar_namespaces(resposta, class_namespace_index)
     else:
         includes_errados = {}
         includes_por_classe = {}
@@ -244,6 +252,7 @@ def _verificar_resposta(
         erros_aridade = []
         erros_semanticos = []
         enums_invalidos = {}
+        namespaces_faltando = {}
 
     classes_legado_usadas = sorted(find_tpz_classes_in_code(resposta) & legacy_classes)
 
@@ -252,7 +261,8 @@ def _verificar_resposta(
 
     nomes_ok = not (classes_alucinadas or includes_errados
                     or includes_por_classe or metodos_suspeitos
-                    or erros_aridade or erros_semanticos or enums_invalidos)
+                    or erros_aridade or erros_semanticos or enums_invalidos
+                    or namespaces_faltando)
 
     compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
     if nomes_ok and tem_codigo and classes_indisponiveis:
@@ -317,6 +327,7 @@ def _verificar_resposta(
         "includes_por_classe":   includes_por_classe or {},
         "metodos_suspeitos":     metodos_suspeitos or [],
         "enums_invalidos":       enums_invalidos,
+        "namespaces_faltando":   namespaces_faltando or {},
         "compilacao":            compilacao,
         "execucao":              execucao,
         "cmake":                 _instrucoes_cmake(resposta) if tem_codigo else "",
@@ -341,6 +352,9 @@ def _descrever_problemas(v: dict) -> list:
     problemas.extend(f"Signature error (arity): {e}" for e in v["erros_aridade"])
     problemas.extend(f"Invalid enum value: {_descrever_enum_invalido(k, i)}"
                      for k, i in v["enums_invalidos"].items())
+    problemas.extend(f"{c} lives in namespace {ns}: write {ns}::{c} "
+                     f"or add 'using namespace {ns};'"
+                     for c, ns in v.get("namespaces_faltando", {}).items())
     problemas.extend(f"Domain rule violated: {e}" for e in v["erros_semanticos"])
     problemas.extend(f"Compiler error: {e}" for e in v["compilacao"]["erros"])
     falha = _descrever_falha_execucao(v.get("execucao", {}))
@@ -354,7 +368,7 @@ def _resultado_de(v: dict, valido: bool, fontes, tentativas: int,
     return {
         **{k: v[k] for k in ("resposta", "alucinacoes", "erros_aridade", "erros_semanticos",
                              "includes", "includes_por_classe", "metodos_suspeitos",
-                             "enums_invalidos", "compilacao", "execucao", "cmake", "classes_legado", "classes_indisponiveis",
+                             "enums_invalidos", "namespaces_faltando", "compilacao", "execucao", "cmake", "classes_legado", "classes_indisponiveis",
                              "correcoes_automaticas")},
         "valido":         valido,
         "modelo":         getattr(llm, "model", type(llm).__name__) if llm is not None else "desconhecido",
@@ -381,6 +395,7 @@ def gerar_codigo(
     methods_whitelist: set = None, class_methods_index: dict = None,
     renames: dict = None, legacy_classes: set = None,
     enum_values_index: dict = None, inheritance_index: dict = None,
+    class_namespace_index: dict = None,
 ) -> dict:
     import difflib
 
@@ -400,6 +415,7 @@ def gerar_codigo(
         legacy_classes     = ctx.legacy_classes
         enum_values_index  = ctx.enum_values_index
         inheritance_index  = ctx.inheritance_index
+        class_namespace_index = ctx.class_namespace_index
         system_base        = ctx.system_base
 
     recursos = _recursos_validacao(PipelineContext(
@@ -410,6 +426,7 @@ def gerar_codigo(
         renames=renames, legacy_classes=legacy_classes, system_base=system_base,
         enum_values_index=enum_values_index or {},
         inheritance_index=inheritance_index or {},
+        class_namespace_index=class_namespace_index or {},
     ))
     methods_whitelist = recursos["methods_whitelist"]
     renames = recursos["renames"]
@@ -427,6 +444,7 @@ def gerar_codigo(
     nomes_ok = False
 
     melhor = None
+    nota_melhor = 0
     diagnosticos = []
     resposta_anterior = None
 
@@ -444,7 +462,6 @@ def gerar_codigo(
 
         contexto = _formatar_contexto(h_docs, e_docs, w_docs)
 
-    nota_melhor = 0
         prompt_txt = _montar_prompt(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
             classes_alucinadas, includes_errados, includes_por_classe,

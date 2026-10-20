@@ -34,6 +34,7 @@ class PipelineContext:
 
     enum_values_index: dict = field(default_factory=dict)
     inheritance_index: dict = field(default_factory=dict)
+    class_namespace_index: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> PipelineContext:
@@ -44,6 +45,7 @@ class PipelineContext:
             _carregar_bancos,
             _carregar_class_header_index,
             _carregar_class_methods_index,
+            _carregar_class_namespace_index,
             _carregar_enum_values_index,
             _carregar_collisions,
             _carregar_headers_whitelist,
@@ -84,6 +86,7 @@ class PipelineContext:
             system_base=_carregar_system_prompt(),
             enum_values_index=_carregar_enum_values_index(),
             inheritance_index=_carregar_inheritance_index(),
+            class_namespace_index=_carregar_class_namespace_index(),
         )
         print("Pronto.\n")
         return ctx

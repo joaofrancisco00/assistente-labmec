@@ -9,6 +9,7 @@ from .config import (
     CLASS_METHODS_INDEX_FILE,
     ENUM_VALUES_INDEX_FILE,
     INHERITANCE_INDEX_FILE,
+    CLASS_NAMESPACE_INDEX_FILE,
     CLASS_HEADER_INDEX_FILE,
     LEGACY_CLASSES_FILE,
     RENAMES_FILE,
@@ -66,6 +67,14 @@ def _carregar_inheritance_index() -> dict:
         return {}
     dados = json.loads(INHERITANCE_INDEX_FILE.read_text(encoding='utf-8'))
     print(f"  Índice de herança: {len(dados)} classes com bases")
+    return dados
+
+def _carregar_class_namespace_index() -> dict:
+    if not CLASS_NAMESPACE_INDEX_FILE.exists():
+        print("⚠️  class_namespace_index.json não encontrado — rode `uv run indexer.py --so-namespaces`.")
+        return {}
+    dados = json.loads(CLASS_NAMESPACE_INDEX_FILE.read_text(encoding='utf-8'))
+    print(f"  Índice classe→namespace: {len(dados)} classes mapeadas")
     return dados
 
 def _carregar_class_header_index() -> dict:

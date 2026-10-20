@@ -61,6 +61,7 @@ METHODS_WHITELIST_FILE = INDEX_DIR / "methods_whitelist.txt"
 CLASS_METHODS_INDEX_FILE = INDEX_DIR / "class_methods_index.json"
 ENUM_VALUES_INDEX_FILE = INDEX_DIR / "enum_values_index.json"
 INHERITANCE_INDEX_FILE = INDEX_DIR / "inheritance_index.json"
+CLASS_NAMESPACE_INDEX_FILE = INDEX_DIR / "class_namespace_index.json"
 
 HEADER_INDEX_DIR        = Path("./header_index")
 CLASS_HEADER_INDEX_FILE  = HEADER_INDEX_DIR / "class_header_index.json"
