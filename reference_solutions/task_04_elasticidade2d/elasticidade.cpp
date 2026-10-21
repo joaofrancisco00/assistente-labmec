@@ -22,33 +22,55 @@
 #include "pzmanvector.h"          // TPZManVector
 #include "pzfmatrix.h"            // TPZFMatrix
 #include "pzvec.h"                // TPZVec
+#include "TPZVTKGenerator.h"      // TPZVTKGenerator (post-processing to .vtk)
 #include <iostream>
+#include <string>
+
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+constexpr int nThreads{4};             // number of threads for assembly and post-processing
+
+TPZGeoMesh *CreateGMesh(int nDiv);
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder);
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh);
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile);
 
 int main() {
-    // ── 1. Geometric mesh (same recipe as 2D Poisson) ────────────────────
+    constexpr int pOrder{2};
+    TPZGeoMesh *gmesh = CreateGMesh(8);
+    TPZCompMesh *cmesh = CreateCMesh(gmesh, pOrder);
+    TPZLinearAnalysis an(cmesh);
+    std::cout << "Elements: " << cmesh->NElements()
+              << " | Equations: " << cmesh->NEquations() << std::endl;
+    SolveProblem(an, cmesh);
+    PrintResults(cmesh, "elasticity2d");
+    delete cmesh;
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh (same recipe as 2D Poisson) ────────────────────────────
+TPZGeoMesh *CreateGMesh(int nDiv) {
     constexpr int dim{2};
     const TPZManVector<REAL, 3> minX = {0., 0., 0.};
     const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
-    const TPZManVector<int, 2> nDivs = {8, 8};
-    constexpr int matIdDomain{1};
-    constexpr int matIdBoundary{-1};
+    const TPZManVector<int, 2> nDivs = {nDiv, nDiv};
     // dim*2 + 1 ids with createBoundEls=true (1 domain + 4 boundaries in 2D)
-    const TPZManVector<int, 5> matIds = {matIdDomain, matIdBoundary,
-                                         matIdBoundary, matIdBoundary,
-                                         matIdBoundary};
+    const TPZManVector<int, 5> matIds = {EDomain, EBC, EBC, EBC, EBC};
 
-    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
+    return TPZGeoMeshTools::CreateGeoMeshOnGrid(
         dim, minX, maxX, matIds, nDivs, MMeshType::ETriangular,
         /*createBoundEls=*/true);
+}
 
-    // ── 2. Computational mesh ────────────────────────────────────────────
-    constexpr int pOrder{2};
+// ── Computational mesh + material + boundary ─────────────────────────────
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder) {
+    constexpr int dim{2};
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
     cmesh->SetAllCreateFunctionsContinuous();  // continuous H1 (displacements)
 
-    // ── 3. Material: TPZElasticity2D (on the heap — the mesh takes ownership)
+    // Material: TPZElasticity2D (on the heap — the mesh takes ownership)
     // ALWAYS use the full constructor, which is the only one that initializes
     // the constitutive law (fConstitutiveLaw) — the member that actually
     // computes stress:
@@ -62,43 +84,43 @@ int main() {
     constexpr STATE E{1000.}, nu{0.3};
     constexpr STATE fx{0.}, fy{-1.};      // self-weight pointing down
     constexpr int planeStress{1};         // 1 = plane stress; 0 = plane strain
-    auto *mat = new TPZElasticity2D(matIdDomain, E, nu, fx, fy, planeStress);
+    auto *mat = new TPZElasticity2D(EDomain, E, nu, fx, fy, planeStress);
     cmesh->InsertMaterialObject(mat);
 
-    // ── 4. Boundary: clamped (homogeneous Dirichlet, type 0) ─────────────
+    // Boundary: clamped (homogeneous Dirichlet, type 0)
     // 2D elasticity has 2 state variables (ux, uy) — val1 is 2x2 and
     // val2 has 2 entries (NOT 1, as in scalar Poisson!)
     TPZFMatrix<STATE> val1(2, 2, 0.);
     TPZManVector<STATE, 2> val2 = {0., 0.};
-    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, EBC, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
-    // ── 5. Build the mesh ────────────────────────────────────────────────
     cmesh->AutoBuild();
-    std::cout << "Elements: " << cmesh->NElements()
-              << " | Equations: " << cmesh->NEquations() << std::endl;
+    return cmesh;
+}
 
-    // ── 6. Assemble and solve ────────────────────────────────────────────
-    TPZLinearAnalysis an(cmesh);
+// ── Assemble and solve ────────────────────────────────────────────────────
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh) {
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    strmat.SetNumThreads(nThreads);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> solver;
-    solver.SetDirect(ECholesky);  // the elasticity stiffness is SPD
+    solver.SetDirect(ELDLt);  // the elasticity stiffness is symmetric
     an.SetSolver(solver);
     an.Assemble();
     an.Solve();
+}
 
-    // ── 7. Post-processing (VTK) ─────────────────────────────────────────
-    // REAL variable names of TPZElasticity2D (see VariableIndex):
-    // "Displacement" (vector), "SigmaX", "SigmaY", "TauXY",
-    // "PrincipalStress1", "PrincipalStress2"... — the names "Solution" and
-    // "Derivative" belong to Poisson and do NOT exist here.
-    const TPZManVector<std::string, 2> scalnames = {"SigmaX", "SigmaY"};
-    const TPZManVector<std::string, 1> vecnames = {"Displacement"};
-    an.DefineGraphMesh(dim, scalnames, vecnames, "elasticity2d.vtk");
-    an.PostProcess(/*resolution=*/1, dim);
-
-    delete cmesh;
-    delete gmesh;
-    return 0;
+// ── Post-processing (VTK) ────────────────────────────────────────────────
+// REAL field names of TPZElasticity2D (see VariableIndex):
+// "Displacement" (vector), "SigmaX", "SigmaY", "TauXY",
+// "PrincipalStress1", "PrincipalStress2"... — the names "Solution" and
+// "Derivative" belong to Poisson and do NOT exist here (unknown names hit
+// DebugStop inside TPZVTKGenerator).
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile) {
+    constexpr int vtkRes{1};
+    TPZVec<std::string> fields = {"Displacement", "SigmaX", "SigmaY", "TauXY"};
+    auto vtk = TPZVTKGenerator(cmesh, fields, plotfile, vtkRes);
+    vtk.SetNThreads(nThreads);
+    vtk.Do();  // writes <plotfile>.0.vtk
 }

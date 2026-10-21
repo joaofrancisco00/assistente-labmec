@@ -21,33 +21,56 @@
 #include "pzmanvector.h"            // TPZManVector
 #include "pzfmatrix.h"              // TPZFMatrix
 #include "pzvec.h"                  // TPZVec
+#include "TPZVTKGenerator.h"        // TPZVTKGenerator (post-processing)
+#include <iostream>
+#include <string>
+
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+constexpr int nThreads{4};             // number of threads for assembly and post-processing
+
+TPZGeoMesh *CreateGMesh(int nDiv);
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder);
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh);
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile);
 
 int main() {
-    // ── 1. Geometric mesh ────────────────────────────────────────────────
+    constexpr int pOrder{2};
+    TPZGeoMesh *gmesh = CreateGMesh(8);
+    TPZCompMesh *cmesh = CreateCMesh(gmesh, pOrder);
+    TPZLinearAnalysis an(cmesh);
+    std::cout << "Elements: " << cmesh->NElements()
+              << " | Equations: " << cmesh->NEquations() << std::endl;
+    SolveProblem(an, cmesh);
+    PrintResults(cmesh, "darcy_h1_2d");
+    delete cmesh;
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh ────────────────────────────────────────────────────────
+TPZGeoMesh *CreateGMesh(int nDiv) {
     constexpr int dim{2};
     const TPZManVector<REAL, 3> minX = {0., 0., 0.};
     const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
-    const TPZManVector<int, 2> nDivs = {8, 8};
-    constexpr int matIdDomain{1};
-    constexpr int matIdBoundary{-1};
+    const TPZManVector<int, 2> nDivs = {nDiv, nDiv};
     // dim*2 + 1 ids with createBoundEls=true (1 domain + 4 boundaries in 2D)
-    const TPZManVector<int, 5> matIds = {matIdDomain, matIdBoundary,
-                                         matIdBoundary, matIdBoundary,
-                                         matIdBoundary};
+    const TPZManVector<int, 5> matIds = {EDomain, EBC, EBC, EBC, EBC};
 
-    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
+    return TPZGeoMeshTools::CreateGeoMeshOnGrid(
         dim, minX, maxX, matIds, nDivs, MMeshType::ETriangular,
         /*createBoundEls=*/true);
+}
 
-    // ── 2. Computational mesh — ONE mesh, H1 space ───────────────────────
-    constexpr int pOrder{2};
+// ── Computational mesh + material + boundary — ONE mesh, H1 space ─────────
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder) {
+    constexpr int dim{2};
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
     cmesh->SetAllCreateFunctionsContinuous();  // continuous H1 (pressure)
 
-    // ── 3. Material (on the heap — the mesh takes ownership) ─────────────
-    auto *mat = new TPZDarcyFlow(matIdDomain, dim);
+    // Material (on the heap — the mesh takes ownership)
+    auto *mat = new TPZDarcyFlow(EDomain, dim);
     // Permeability K (from TPZIsotropicPermeability). For a spatially
     // varying K there is SetPermeabilityFunction.
     mat->SetConstantPermeability(1.);
@@ -59,42 +82,41 @@ int main() {
         pOrder);
     cmesh->InsertMaterialObject(mat);
 
-    // ── 4. Boundary ──────────────────────────────────────────────────────
-    // In H1 the unknown is the pressure: type 0 = Dirichlet (imposed pressure),
-    // type 1 = Neumann (imposed normal flux). 1 state variable → val2
-    // with 1 entry.
+    // Boundary: in H1 the unknown is the pressure — type 0 = Dirichlet
+    // (imposed pressure), type 1 = Neumann (imposed normal flux).
+    // 1 state variable → val2 with 1 entry.
     TPZFMatrix<STATE> val1(1, 1, 0.);
     TPZManVector<STATE, 1> val2 = {0.};
-    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, EBC, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
-    // ── 5. Build the mesh ────────────────────────────────────────────────
     cmesh->AutoBuild();
-    std::cout << "Elements: " << cmesh->NElements()
-              << " | Equations: " << cmesh->NEquations() << std::endl;
+    return cmesh;
+}
 
-    // ── 6. Assemble and solve ────────────────────────────────────────────
-    // The H1 system is SPD (unlike the mixed formulation, which is a saddle
-    // point and requires ELDLt) → ECholesky works.
-    TPZLinearAnalysis an(cmesh);
+// ── Assemble and solve ────────────────────────────────────────────────────
+// The H1 system is SPD (unlike the mixed formulation, which is a saddle
+// point and REQUIRES ELDLt) — we still use ELDLt as the standard direct
+// solver for symmetric systems.
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh) {
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    strmat.SetNumThreads(nThreads);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> solver;
-    solver.SetDirect(ECholesky);
+    solver.SetDirect(ELDLt);
     an.SetSolver(solver);
     an.Assemble();
     an.Solve();
+}
 
-    // ── 7. Post-processing (VTK) ─────────────────────────────────────────
-    // Real TPZDarcyFlow names (see VariableIndex): "Pressure"/"Solution"
-    // (scalar), "Flux"/"MinusKGradU" (vector, = -K∇p), "Derivative"/"GradU",
-    // "Divergence", "NormKDu".
-    const TPZManVector<std::string, 1> scalnames = {"Pressure"};
-    const TPZManVector<std::string, 1> vecnames = {"Flux"};
-    an.DefineGraphMesh(dim, scalnames, vecnames, "darcy_h1_2d.vtk");
-    an.PostProcess(/*resolution=*/1, dim);
-
-    delete cmesh;
-    delete gmesh;
-    return 0;
+// ── Post-processing (VTK) ────────────────────────────────────────────────
+// Real TPZDarcyFlow names (see VariableIndex): "Pressure"/"Solution"
+// (scalar), "Flux"/"MinusKGradU" (vector, = -K∇p), "Derivative"/"GradU",
+// "Divergence", "NormKDu". Unknown names hit DebugStop.
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile) {
+    constexpr int vtkRes{1};
+    TPZVec<std::string> fields = {"Pressure", "Flux"};
+    auto vtk = TPZVTKGenerator(cmesh, fields, plotfile, vtkRes);
+    vtk.SetNThreads(nThreads);
+    vtk.Do();  // writes <plotfile>.0.vtk
 }

@@ -20,12 +20,28 @@
 #include "pzeltype.h"       // ETriangle, EQuadrilateral, EOned (MElementType)
 #include <iostream>
 
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+
+TPZGeoMesh *CreateGMesh();
+
 int main() {
-    // ── 1. Create the geometric mesh and set the dimension ────────────────
+    TPZGeoMesh *gmesh = CreateGMesh();
+
+    // ── Simple check ─────────────────────────────────────────────────────
+    std::cout << "Nodes:    " << gmesh->NNodes()    << std::endl;
+    std::cout << "Elements: " << gmesh->NElements() << std::endl;
+
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh built by hand ────────────────────────────────────────────
+TPZGeoMesh *CreateGMesh() {
+    // 1. Create the geometric mesh and set the dimension
     TPZGeoMesh *gmesh = new TPZGeoMesh();
     gmesh->SetDimension(2);
 
-    // ── 2. Allocate and initialize the nodes ─────────────────────────────
+    // 2. Allocate and initialize the nodes
     // Canonical pattern: AllocateNewElement() reserves space in the ChunkVector
     // and returns the index; Initialize() fills in the coordinates and
     // registers the node.
@@ -55,45 +71,38 @@ int main() {
         gmesh->NodeVec()[newindex].Initialize(coords[i], *gmesh);
     }
 
-    // ── 3. Create the geometric elements ─────────────────────────────────
-    constexpr int matIdDom{1};
-    constexpr int matIdBC{-1};
+    // 3. Create the geometric elements
     int64_t index{-1};
 
     // Quadrilateral: 4 nodes in counter-clockwise order
     TPZManVector<int64_t, 4> quadNodes = {0, 1, 2, 3};
-    gmesh->CreateGeoElement(EQuadrilateral, quadNodes, matIdDom, index);
+    gmesh->CreateGeoElement(EQuadrilateral, quadNodes, EDomain, index);
 
     // Triangle: 3 nodes in counter-clockwise order
     // (shares edge 1-2 with the quadrilateral above)
     TPZManVector<int64_t, 3> triNodes = {1, 2, 3};
-    gmesh->CreateGeoElement(ETriangle, triNodes, matIdDom, index);
+    gmesh->CreateGeoElement(ETriangle, triNodes, EDomain, index);
 
-    // ── 4. Build the connectivity ────────────────────────────────────────
+    // 4. Build the connectivity
     // MANDATORY after inserting all elements — without it the neighbors are
     // null and the numerical integration does not work.
     gmesh->BuildConnectivity();
 
-    // ── 5. Create boundary elements via TPZGeoElBC ───────────────────────
+    // 5. Create boundary elements via TPZGeoElBC
     // TPZGeoElBC creates a 1D boundary element on a side of an existing
     // element. The 1D sides of a quadrilateral (4 nodes) are 4, 5, 6 and 7.
     // The 1D sides of a triangle (3 nodes) are 3, 4 and 5.
     {
         TPZGeoEl *quad = gmesh->Element(0);
         // 1D sides of the quadrilateral: 4=edge 0-1, 5=1-2, 6=2-3, 7=3-0
-        TPZGeoElBC(quad, 4, matIdBC);  // bottom boundary
-        TPZGeoElBC(quad, 7, matIdBC);  // left boundary
+        TPZGeoElBC(quad, 4, EBC);  // bottom boundary
+        TPZGeoElBC(quad, 7, EBC);  // left boundary
     }
     {
         TPZGeoEl *tri = gmesh->Element(1);
         // 1D sides of the triangle: 3=edge 1-2, 4=2-3, 5=3-1
-        TPZGeoElBC(tri, 5, matIdBC);   // diagonal boundary
+        TPZGeoElBC(tri, 5, EBC);   // diagonal boundary
     }
 
-    // ── 6. Simple check ──────────────────────────────────────────────────
-    std::cout << "Nodes:    " << gmesh->NNodes()    << std::endl;
-    std::cout << "Elements: " << gmesh->NElements() << std::endl;
-
-    delete gmesh;
-    return 0;
+    return gmesh;
 }

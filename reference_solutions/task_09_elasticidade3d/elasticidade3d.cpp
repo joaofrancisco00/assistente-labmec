@@ -22,74 +22,95 @@
 #include "pzmanvector.h"          // TPZManVector
 #include "pzfmatrix.h"            // TPZFMatrix
 #include "pzvec.h"                // TPZVec
+#include "TPZVTKGenerator.h"      // TPZVTKGenerator (post-processing to .vtk)
 #include <iostream>
+#include <string>
+
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+constexpr int nThreads{4};             // number of threads for assembly and post-processing
+
+TPZGeoMesh *CreateGMesh(int nDiv);
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder);
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh);
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile);
 
 int main() {
-    // ── 1. Geometric mesh — unit cube, hexahedra ─────────────────────────
+    constexpr int pOrder{1};
+    TPZGeoMesh *gmesh = CreateGMesh(4);
+    TPZCompMesh *cmesh = CreateCMesh(gmesh, pOrder);
+    TPZLinearAnalysis an(cmesh);
+    std::cout << "Elements: " << cmesh->NElements()
+              << " | Equations: " << cmesh->NEquations() << std::endl;
+    SolveProblem(an, cmesh);
+    PrintResults(cmesh, "elasticity3d");
+    delete cmesh;
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh — unit cube, hexahedra ────────────────────────────────
+TPZGeoMesh *CreateGMesh(int nDiv) {
     constexpr int dim{3};
     const TPZManVector<REAL, 3> minX = {0., 0., 0.};
     const TPZManVector<REAL, 3> maxX = {1., 1., 1.};
-    const TPZManVector<int, 3> nDivs = {4, 4, 4};   // size = dim
-    constexpr int matIdDomain{1};
-    constexpr int matIdBoundary{-1};
+    const TPZManVector<int, 3> nDivs = {nDiv, nDiv, nDiv};   // size = dim
     // dim*2 + 1 = 7 ids in 3D (1 domain + 6 faces) when createBoundEls=true
-    const TPZManVector<int, 7> matIds = {matIdDomain, matIdBoundary, matIdBoundary,
-                                         matIdBoundary, matIdBoundary, matIdBoundary,
-                                         matIdBoundary};
-    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
+    const TPZManVector<int, 7> matIds = {EDomain, EBC, EBC, EBC, EBC, EBC, EBC};
+    return TPZGeoMeshTools::CreateGeoMeshOnGrid(
         dim, minX, maxX, matIds, nDivs, MMeshType::EHexahedral,
         /*createBoundEls=*/true);
+}
 
-    // ── 2. Computational mesh ────────────────────────────────────────────
-    constexpr int pOrder{1};
+// ── Computational mesh + material + boundary ─────────────────────────────
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder) {
+    constexpr int dim{3};
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
     cmesh->SetAllCreateFunctionsContinuous();  // continuous H1 (displacements)
 
-    // ── 3. Material: TPZElasticity3D (on the heap — the mesh takes ownership)
+    // Material: TPZElasticity3D (on the heap — the mesh takes ownership)
     // Constructor is (id, E, nu, TPZVec<STATE> &force) — the body force is a
     // 3-entry vector; there is NO fx/fy or plane-stress flag — that belongs
     // to the 2D material.
     constexpr STATE E{1000.}, nu{0.3};
     TPZManVector<STATE, 3> force = {0., 0., -1.};  // self-weight along -z
-    auto *mat = new TPZElasticity3D(matIdDomain, E, nu, force);
+    auto *mat = new TPZElasticity3D(EDomain, E, nu, force);
     cmesh->InsertMaterialObject(mat);
 
-    // ── 4. Boundary: clamped (homogeneous Dirichlet, type 0) ─────────────
+    // Boundary: clamped (homogeneous Dirichlet, type 0)
     // 3D elasticity has 3 state variables (ux, uy, uz) — val1 is 3x3 and
     // val2 has 3 entries (NOT 2, as in 2D elasticity!)
     TPZFMatrix<STATE> val1(3, 3, 0.);
     TPZManVector<STATE, 3> val2 = {0., 0., 0.};
-    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, EBC, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
-    // ── 5. Build the mesh ────────────────────────────────────────────────
     cmesh->AutoBuild();
-    std::cout << "Elements: " << cmesh->NElements()
-              << " | Equations: " << cmesh->NEquations() << std::endl;
+    return cmesh;
+}
 
-    // ── 6. Assemble and solve ────────────────────────────────────────────
-    TPZLinearAnalysis an(cmesh);
+// ── Assemble and solve ────────────────────────────────────────────────────
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh) {
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    strmat.SetNumThreads(nThreads);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> solver;
-    solver.SetDirect(ECholesky);  // the elasticity stiffness is SPD
+    solver.SetDirect(ELDLt);  // the elasticity stiffness is symmetric
     an.SetSolver(solver);
     an.Assemble();
     an.Solve();
+}
 
-    // ── 7. Post-processing (VTK) ─────────────────────────────────────────
-    // REAL variable names of TPZElasticity3D (see VariableIndex):
-    // "Displacement" (vector), "StressX", "StressY", "StressZ",
-    // "VonMises", "PrincipalStress"... — "SigmaY"/"TauXY" are 2D names
-    // and do NOT exist here.
-    const TPZManVector<std::string, 2> scalnames = {"StressX", "VonMises"};
-    const TPZManVector<std::string, 1> vecnames = {"Displacement"};
-    an.DefineGraphMesh(dim, scalnames, vecnames, "elasticity3d.vtk");
-    an.PostProcess(/*resolution=*/1, dim);
-
-    delete cmesh;
-    delete gmesh;
-    return 0;
+// ── Post-processing (VTK) ────────────────────────────────────────────────
+// REAL field names of TPZElasticity3D (see VariableIndex):
+// "Displacement" (vector), "Stress", "Strain" (tensors), "StressX",
+// "VonMises", "PrincipalStress"... — "SigmaY"/"TauXY" are 2D names
+// and do NOT exist here (unknown names hit DebugStop).
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile) {
+    constexpr int vtkRes{1};
+    TPZVec<std::string> fields = {"Displacement", "Stress", "Strain"};
+    auto vtk = TPZVTKGenerator(cmesh, fields, plotfile, vtkRes);
+    vtk.SetNThreads(nThreads);
+    vtk.Do();  // writes <plotfile>.0.vtk
 }

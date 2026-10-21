@@ -139,36 +139,53 @@ TPZGeoElBC(tri, 5, /*matIdBC=*/-1);
 #include "pzgeoel.h"
 #include "pzgeoelbc.h"
 #include "pzeltype.h"
+#include <iostream>
+
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+
+TPZGeoMesh *CreateGMesh();
 
 int main() {
-    TPZGeoMesh *gmesh = new TPZGeoMesh();
+    TPZGeoMesh *gmesh = CreateGMesh();
+
+    std::cout << "Nodes:    " << gmesh->NNodes()    << std::endl;
+    std::cout << "Elements: " << gmesh->NElements() << std::endl;
+
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh: unit square, 1 quadrilateral + 1 triangle ────────────
+TPZGeoMesh *CreateGMesh() {
+    auto *gmesh = new TPZGeoMesh();
     gmesh->SetDimension(2);
 
-    // Nodes
-    const int nNodes = 4;
+    // Nodes — NEVER Resize() before AllocateNewElement(), and never PushBack
     const TPZManVector<TPZManVector<REAL,3>,4> coords = {
         {0.,0.,0.}, {1.,0.,0.}, {1.,1.,0.}, {0.,1.,0.}
     };
-    for (int i = 0; i < nNodes; i++) {
+    for (int i = 0; i < 4; i++) {
         auto idx = gmesh->NodeVec().AllocateNewElement();
         gmesh->NodeVec()[idx].Initialize(coords[i], *gmesh);
     }
 
-    // Elements
+    // Elements — the type is an MElementType enum (EQuadrilateral, ...)
     int64_t index{-1};
     TPZManVector<int64_t,4> quadNodes = {0,1,2,3};
-    gmesh->CreateGeoElement(EQuadrilateral, quadNodes, 1, index);
+    gmesh->CreateGeoElement(EQuadrilateral, quadNodes, EDomain, index);
 
     TPZManVector<int64_t,3> triNodes = {1,2,3};
-    gmesh->CreateGeoElement(ETriangle, triNodes, 1, index);
+    gmesh->CreateGeoElement(ETriangle, triNodes, EDomain, index);
 
+    // MANDATORY after inserting all elements — without it the neighbors are null
     gmesh->BuildConnectivity();
 
-    // Boundary
-    TPZGeoElBC(gmesh->Element(0), 4, -1);  // edge 0-1
+    // Boundary — 1D sides of a quadrilateral: 4..7; of a triangle: 3..5
+    TPZGeoElBC(gmesh->Element(0), 4, EBC);  // quad edge 0-1 (bottom)
+    TPZGeoElBC(gmesh->Element(0), 7, EBC);  // quad edge 3-0 (left)
+    TPZGeoElBC(gmesh->Element(1), 5, EBC);  // tri edge 3-1 (diagonal)
 
-    delete gmesh;
-    return 0;
+    return gmesh;
 }
 ```
 

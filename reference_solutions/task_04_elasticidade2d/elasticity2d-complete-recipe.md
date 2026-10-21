@@ -2,7 +2,8 @@
 
 Canonical flow for 2D linear elasticity (plane stress or plane strain) with
 Dirichlet conditions, using the **current API**. The skeleton
-(mesh → cmesh → material → boundary → AutoBuild → Assemble → Solve) is the
+(`CreateGMesh` → `CreateCMesh` → `SolveProblem` → `PrintResults` — the
+structure real LabMeC code uses, with an `enum` for material ids) is the
 same as the 2D Poisson recipe — what changes is the material and everything
 that follows from the solution being a vector.
 
@@ -22,7 +23,7 @@ constitutive law (`fConstitutiveLaw`), which is the member that actually compute
 constexpr STATE E{1000.}, nu{0.3};
 constexpr STATE fx{0.}, fy{-1.};   // self-weight pointing down
 constexpr int planeStress{1};      // 1 = plane stress; 0 = plane strain
-auto *mat = new TPZElasticity2D(matIdDomain, E, nu, fx, fy, planeStress);
+auto *mat = new TPZElasticity2D(EDomain, E, nu, fx, fy, planeStress);
 ```
 
 Do **not** use the 1-argument constructor with `SetElasticity`: that setter only
@@ -39,10 +40,11 @@ No name-based validation catches this error: `TPZElasticity2D` and
 1. **2 state variables** (ux, uy): in the boundary condition, `val1` is
    `TPZFMatrix<STATE>(2, 2, 0.)` and `val2` has **2 entries** (`{0., 0.}`) —
    size 1 is an error.
-2. **Post-processing**: the variable names belong to the material —
-   `"Displacement"` (vector), `"SigmaX"`, `"SigmaY"`, `"TauXY"`,
-   `"PrincipalStress1"`, `"PrincipalStress2"`, `"MaxStress"`.
-   `"Solution"`/`"Derivative"` belong to Poisson and **do not exist** here.
+2. **Post-processing** uses `TPZVTKGenerator` and the field names belong to
+   the material — `"Displacement"` (vector), `"SigmaX"`, `"SigmaY"`,
+   `"TauXY"`, `"PrincipalStress1"`, `"PrincipalStress2"`, `"MaxStress"`.
+   `"Solution"`/`"Derivative"` belong to Poisson and **do not exist** here —
+   an unknown name makes `TPZVTKGenerator` `DebugStop` at runtime.
 3. **Body force** enters as `fx`/`fy` in the constructor itself — no need
    for `SetForcingFunction` for a constant load.
 
@@ -60,65 +62,91 @@ No name-based validation catches this error: `TPZElasticity2D` and
 #include "pzmanvector.h"          // TPZManVector
 #include "pzfmatrix.h"            // TPZFMatrix
 #include "pzvec.h"                // TPZVec
+#include "TPZVTKGenerator.h"      // TPZVTKGenerator (post-processing to .vtk)
+#include <string>
+
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+constexpr int nThreads{4};             // number of threads for assembly and post-processing
+
+TPZGeoMesh *CreateGMesh(int nDiv);
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder);
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh);
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile);
 
 int main() {
-    // 1. Geometric mesh
+    constexpr int pOrder{2};
+    TPZGeoMesh *gmesh = CreateGMesh(8);
+    TPZCompMesh *cmesh = CreateCMesh(gmesh, pOrder);
+    TPZLinearAnalysis an(cmesh);
+    SolveProblem(an, cmesh);
+    PrintResults(cmesh, "elasticity2d");
+    delete cmesh;
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh ────────────────────────────────────────────────────────
+TPZGeoMesh *CreateGMesh(int nDiv) {
     constexpr int dim{2};
+    // minX/maxX ALWAYS have 3 coordinates, even in 2D
     const TPZManVector<REAL, 3> minX = {0., 0., 0.};
     const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
-    const TPZManVector<int, 2> nDivs = {8, 8};
-    constexpr int matIdDomain{1};
-    constexpr int matIdBoundary{-1};
-    const TPZManVector<int, 5> matIds = {matIdDomain, matIdBoundary,
-                                         matIdBoundary, matIdBoundary,
-                                         matIdBoundary};
-    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
-        dim, minX, maxX, matIds, nDivs, MMeshType::ETriangular, true);
+    const TPZManVector<int, 2> nDivs = {nDiv, nDiv};  // size = dim
 
-    // 2. Computational mesh
-    constexpr int pOrder{2};
+    // matIds needs dim*2 + 1 ids with createBoundEls=true (5 in 2D)
+    const TPZManVector<int, 5> matIds = {EDomain, EBC, EBC, EBC, EBC};
+
+    return TPZGeoMeshTools::CreateGeoMeshOnGrid(
+        dim, minX, maxX, matIds, nDivs, MMeshType::ETriangular,
+        /*createBoundEls=*/true);
+}
+
+// ── Computational mesh + material + boundary ─────────────────────────────
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder) {
+    constexpr int dim{2};
     auto *cmesh = new TPZCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
-    cmesh->SetAllCreateFunctionsContinuous();
+    cmesh->SetAllCreateFunctionsContinuous();  // continuous H1 approximation
 
-    // 3. 2D material (on the heap — the mesh takes ownership)
+    // 2D material — ALWAYS on the heap (the mesh takes ownership).
     // Full constructor: it is the only one that initializes the constitutive law.
     // With (id) + SetElasticity, SigmaX/SigmaY come out ZERO with no error at all.
     constexpr STATE E{1000.}, nu{0.3};
     constexpr STATE fx{0.}, fy{-1.};  // self-weight
     constexpr int planeStress{1};     // 1 = plane stress; 0 = plane strain
-    auto *mat = new TPZElasticity2D(matIdDomain, E, nu, fx, fy, planeStress);
+    auto *mat = new TPZElasticity2D(EDomain, E, nu, fx, fy, planeStress);
     cmesh->InsertMaterialObject(mat);
 
-    // 4. Clamped on the whole boundary (Dirichlet, type 0) — val2 with 2 entries
+    // Clamped on the whole boundary (Dirichlet, type 0) — val2 with 2 entries
     TPZFMatrix<STATE> val1(2, 2, 0.);
     TPZManVector<STATE, 2> val2 = {0., 0.};
-    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, EBC, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
-    // 5. Build the mesh
-    cmesh->AutoBuild();
+    cmesh->AutoBuild();  // without it the computational mesh stays empty
+    return cmesh;
+}
 
-    // 6. Assemble and solve
-    TPZLinearAnalysis an(cmesh);
+// ── Assemble and solve ────────────────────────────────────────────────────
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh) {
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    strmat.SetNumThreads(nThreads);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> solver;
-    solver.SetDirect(ECholesky);
+    solver.SetDirect(ELDLt);  // symmetric system — the standard direct solver
     an.SetSolver(solver);
-    an.Assemble();
+    an.Assemble();  // Solve does NOT assemble
     an.Solve();
+}
 
-    // 7. Post-processing (VTK) — TPZElasticity2D variable names
-    const TPZManVector<std::string, 2> scalnames = {"SigmaX", "SigmaY"};
-    const TPZManVector<std::string, 1> vecnames = {"Displacement"};
-    an.DefineGraphMesh(dim, scalnames, vecnames, "elasticity2d.vtk");
-    an.PostProcess(1, dim);
-
-    delete cmesh;
-    delete gmesh;
-    return 0;
+// ── Post-processing (VTK for Paraview) ────────────────────────────────────
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile) {
+    constexpr int vtkRes{1};
+    TPZVec<std::string> fields = {"Displacement", "SigmaX", "SigmaY", "TauXY"};
+    auto vtk = TPZVTKGenerator(cmesh, fields, plotfile, vtkRes);
+    vtk.SetNThreads(nThreads);
+    vtk.Do();  // writes <plotfile>.0.vtk
 }
 ```
 
@@ -134,8 +162,9 @@ int main() {
 - **`#include "TPZElasticity2D.h"` without the `Elasticity/` prefix** — does not compile.
 - **`val2` with 1 entry** in `CreateBC` — 2D elasticity has 2 state
   variables; `val2 = {0., 0.}`.
-- **`"Solution"`/`"Derivative"` in `DefineGraphMesh`** — those are Poisson names;
-  here it is `"Displacement"`, `"SigmaX"` etc.
+- **`DefineGraphMesh`/`PostProcess`** — legacy path: use `TPZVTKGenerator`.
+  And the field names are per-material: `"Solution"`/`"Derivative"` are
+  Poisson names — here they are `"Displacement"`, `"SigmaX"`, etc.
 - **`TPZMatElasticity2D`** — old name, no longer exists; today it is
   `TPZElasticity2D`.
 - **Material on the stack / forgetting `AutoBuild` / `Solve` without `Assemble`** —

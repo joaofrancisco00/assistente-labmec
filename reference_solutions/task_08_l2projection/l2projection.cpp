@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <string>
 
 #include "pzgmesh.h"            // TPZGeoMesh
 #include "TPZGeoMeshTools.h"    // TPZGeoMeshTools::CreateGeoMeshOnGrid
@@ -27,6 +28,17 @@
 #include "pzstepsolver.h"       // TPZStepSolver
 #include "pzmanvector.h"        // TPZManVector
 #include "pzfmatrix.h"          // TPZFMatrix
+#include "pzvec.h"              // TPZVec
+#include "TPZVTKGenerator.h"    // TPZVTKGenerator (post-processing to .vtk)
+
+enum EMatid { ENone, EDomain };        // material ids: 0 is never used
+constexpr int nThreads{4};             // number of threads for assembly and post-processing
+
+TPZGeoMesh *CreateGMesh(int nDiv);
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder);
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh);
+REAL ComputeL2Error(TPZLinearAnalysis &an);
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile);
 
 // Function to project: f(x,y) = sin(πx)·sin(πy)
 static void TargetFunction(const TPZVec<REAL> &x, TPZVec<STATE> &f) {
@@ -43,61 +55,16 @@ static void ExactSolution(const TPZVec<REAL> &x, TPZVec<STATE> &u,
 
 // Projects f onto an nDiv×nDiv mesh and returns the error in the L2 norm
 static REAL ProjectL2(int nDiv, int pOrder, bool exportVTK) {
-    // ── 1. Geometric mesh ────────────────────────────────────────────────
-    // A pure L2 projection has no boundary condition: the mass matrix is
-    // already symmetric positive definite. Hence createBoundEls = false and
-    // matIds has only the domain id (with boundaries, it would be dim*2 + 1 ids).
-    constexpr int dim{2};
-    constexpr int matIdDomain{1};
-    const TPZManVector<REAL, 3> minX = {0., 0., 0.};   // always 3 coordinates
-    const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
-    const TPZManVector<int, 2> nDivs = {nDiv, nDiv};   // size = dim
-    const TPZManVector<int, 1> matIds = {matIdDomain};
-    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
-        dim, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral, false);
-
-    // ── 2. H1 computational mesh ─────────────────────────────────────────
-    auto *cmesh = new TPZCompMesh(gmesh);
-    cmesh->SetDimModel(dim);
-    cmesh->SetDefaultOrder(pOrder);
-    cmesh->SetAllCreateFunctionsContinuous();
-
-    // ── 3. Projection material (on the heap — the mesh takes ownership) ──
-    // Constructor: TPZL2Projection(id, dim, nstate = 1).
-    // The function to project enters through the material FORCING FUNCTION.
-    auto *mat = new TPZL2Projection<STATE>(matIdDomain, dim);
-    mat->SetForcingFunction(TargetFunction, pOrder + 2);
-    // The exact solution is only needed to compute the error
-    mat->SetExactSol(ExactSolution, pOrder + 2);
-    cmesh->InsertMaterialObject(mat);
-
-    cmesh->AutoBuild();
+    TPZGeoMesh *gmesh = CreateGMesh(nDiv);
+    TPZCompMesh *cmesh = CreateCMesh(gmesh, pOrder);
 
     REAL errorL2;
     {
-        // ── 4. Assemble and solve (mass matrix: SPD → Cholesky) ──────────
         TPZLinearAnalysis an(cmesh);
-        TPZSkylineStructMatrix<STATE> strmat(cmesh);
-        an.SetStructuralMatrix(strmat);
-        TPZStepSolver<STATE> solver;
-        solver.SetDirect(ECholesky);
-        an.SetSolver(solver);
-        an.Assemble();
-        an.Solve();
-
-        // ── 5. Error: [0] = H1 norm, [1] = L2 norm, [2] = H1 seminorm ────
-        // The vector MUST arrive with size 3 (= the material NEvalErrors):
-        // empty, EvaluateError aborts with "error vector incompatible".
-        TPZManVector<REAL, 3> errors(3, 0.);
-        an.PostProcessError(errors, false);
-        errorL2 = errors[1];
-
-        // ── 6. Post-processing (VTK) — TPZL2Projection variables ─────────
+        SolveProblem(an, cmesh);
+        errorL2 = ComputeL2Error(an);
         if (exportVTK) {
-            const TPZManVector<std::string, 1> scalnames = {"Solution"};
-            const TPZManVector<std::string, 1> vecnames = {"Derivative"};
-            an.DefineGraphMesh(dim, scalnames, vecnames, "l2projection.vtk");
-            an.PostProcess(1, dim);
+            PrintResults(cmesh, "l2projection");
         }
     }
 
@@ -121,4 +88,71 @@ int main() {
         previousError = error;
     }
     return 0;
+}
+
+// ── Geometric mesh ────────────────────────────────────────────────────────
+// A pure L2 projection has no boundary condition: the mass matrix is
+// already symmetric positive definite. Hence createBoundEls = false and
+// matIds has only the domain id (with boundaries, it would be dim*2 + 1 ids).
+TPZGeoMesh *CreateGMesh(int nDiv) {
+    constexpr int dim{2};
+    const TPZManVector<REAL, 3> minX = {0., 0., 0.};   // always 3 coordinates
+    const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
+    const TPZManVector<int, 2> nDivs = {nDiv, nDiv};   // size = dim
+    const TPZManVector<int, 1> matIds = {EDomain};
+    return TPZGeoMeshTools::CreateGeoMeshOnGrid(
+        dim, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral, false);
+}
+
+// ── H1 computational mesh + projection material ──────────────────────────
+TPZCompMesh *CreateCMesh(TPZGeoMesh *gmesh, int pOrder) {
+    constexpr int dim{2};
+    auto *cmesh = new TPZCompMesh(gmesh);
+    cmesh->SetDimModel(dim);
+    cmesh->SetDefaultOrder(pOrder);
+    cmesh->SetAllCreateFunctionsContinuous();
+
+    // Projection material (on the heap — the mesh takes ownership).
+    // Constructor: TPZL2Projection(id, dim, nstate = 1).
+    // The function to project enters through the material FORCING FUNCTION.
+    auto *mat = new TPZL2Projection<STATE>(EDomain, dim);
+    mat->SetForcingFunction(TargetFunction, pOrder + 2);
+    // The exact solution is only needed to compute the error
+    mat->SetExactSol(ExactSolution, pOrder + 2);
+    cmesh->InsertMaterialObject(mat);
+
+    cmesh->AutoBuild();
+    return cmesh;
+}
+
+// ── Assemble and solve (mass matrix: symmetric → ELDLt) ──────────────────
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh) {
+    TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    strmat.SetNumThreads(nThreads);
+    an.SetStructuralMatrix(strmat);
+    TPZStepSolver<STATE> solver;
+    solver.SetDirect(ELDLt);
+    an.SetSolver(solver);
+    an.Assemble();
+    an.Solve();
+}
+
+// ── Error: [0] = H1 norm, [1] = L2 norm, [2] = H1 seminorm ────────────────
+// The vector MUST arrive with size 3 (= the material NEvalErrors):
+// empty, EvaluateError aborts with "error vector incompatible".
+REAL ComputeL2Error(TPZLinearAnalysis &an) {
+    TPZManVector<REAL, 3> errors(3, 0.);
+    an.PostProcessError(errors, false);
+    return errors[1];
+}
+
+// ── Post-processing (VTK) — TPZL2Projection variables ─────────────────────
+// "Solution" (scalar) and "Derivative" (vector) — see VariableIndex.
+// Unknown names hit DebugStop inside TPZVTKGenerator.
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile) {
+    constexpr int vtkRes{1};
+    TPZVec<std::string> fields = {"Solution", "Derivative"};
+    auto vtk = TPZVTKGenerator(cmesh, fields, plotfile, vtkRes);
+    vtk.SetNThreads(nThreads);
+    vtk.Do();  // writes <plotfile>.0.vtk
 }

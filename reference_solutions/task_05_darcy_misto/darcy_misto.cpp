@@ -24,9 +24,53 @@
 #include "pzmanvector.h"              // TPZManVector
 #include "pzfmatrix.h"                // TPZFMatrix
 #include "pzvec.h"                    // TPZVec
+#include "TPZVTKGenerator.h"          // TPZVTKGenerator (post-processing)
+#include <string>
 
-constexpr int matIdDomain{1};
-constexpr int matIdBoundary{-1};
+enum EMatid { ENone, EDomain, EBC };   // material ids: 0 is never used
+constexpr int nThreads{4};             // number of threads for assembly and post-processing
+
+TPZGeoMesh *CreateGMesh(int nDiv);
+TPZCompMesh *CreateFluxMesh(TPZGeoMesh *gmesh, int dim, int pOrder);
+TPZCompMesh *CreatePressureMesh(TPZGeoMesh *gmesh, int dim, int pOrder);
+TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZGeoMesh *gmesh, int dim, int pOrder,
+                                                TPZCompMesh *cmeshFlux,
+                                                TPZCompMesh *cmeshPressure);
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh);
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile);
+
+int main() {
+    constexpr int dim{2};
+    constexpr int pOrder{1};
+
+    TPZGeoMesh *gmesh           = CreateGMesh(8);
+    TPZCompMesh *cmeshFlux      = CreateFluxMesh(gmesh, dim, pOrder);
+    TPZCompMesh *cmeshPressure  = CreatePressureMesh(gmesh, dim, pOrder);
+    TPZMultiphysicsCompMesh *cmesh = CreateMultiphysicsMesh(gmesh, dim, pOrder,
+                                                         cmeshFlux, cmeshPressure);
+
+    TPZLinearAnalysis an(cmesh);
+    SolveProblem(an, cmesh);
+    PrintResults(cmesh, "darcy_mixed2d");
+
+    delete cmesh;
+    delete cmeshFlux;
+    delete cmeshPressure;
+    delete gmesh;
+    return 0;
+}
+
+// ── Geometric mesh (same recipe as the others) ────────────────────────────
+TPZGeoMesh *CreateGMesh(int nDiv) {
+    constexpr int dim{2};
+    const TPZManVector<REAL, 3> minX = {0., 0., 0.};
+    const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
+    const TPZManVector<int, 2> nDivs = {nDiv, nDiv};
+    const TPZManVector<int, 5> matIds = {EDomain, EBC, EBC, EBC, EBC};
+    return TPZGeoMeshTools::CreateGeoMeshOnGrid(
+        dim, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral,
+        /*createBoundEls=*/true);
+}
 
 // ── Atomic FLUX mesh: H(div) space ───────────────────────────────────────
 // TPZNullMaterial is only a space marker — the physics lives in the
@@ -38,8 +82,8 @@ TPZCompMesh *CreateFluxMesh(TPZGeoMesh *gmesh, int dim, int pOrder) {
     cmesh->SetDimModel(dim);
 
     constexpr int nstate{1};
-    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdDomain, dim, nstate));
-    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdBoundary, dim - 1, nstate));
+    cmesh->InsertMaterialObject(new TPZNullMaterial<>(EDomain, dim, nstate));
+    cmesh->InsertMaterialObject(new TPZNullMaterial<>(EBC, dim - 1, nstate));
 
     cmesh->SetAllCreateFunctionsHDiv();
     cmesh->SetDefaultOrder(pOrder);
@@ -58,7 +102,7 @@ TPZCompMesh *CreatePressureMesh(TPZGeoMesh *gmesh, int dim, int pOrder) {
     cmesh->SetDefaultOrder(pOrder);
 
     constexpr int nstate{1};
-    cmesh->InsertMaterialObject(new TPZNullMaterial<>(matIdDomain, dim, nstate));
+    cmesh->InsertMaterialObject(new TPZNullMaterial<>(EDomain, dim, nstate));
 
     cmesh->SetAllCreateFunctionsContinuous();
     cmesh->ApproxSpace().CreateDisconnectedElements(true);  // L2: continuous PER element
@@ -70,31 +114,16 @@ TPZCompMesh *CreatePressureMesh(TPZGeoMesh *gmesh, int dim, int pOrder) {
     return cmesh;
 }
 
-int main() {
-    // ── 1. Geometric mesh (same recipe as the others) ────────────────────
-    constexpr int dim{2};
-    constexpr int pOrder{1};
-    const TPZManVector<REAL, 3> minX = {0., 0., 0.};
-    const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
-    const TPZManVector<int, 2> nDivs = {8, 8};
-    const TPZManVector<int, 5> matIds = {matIdDomain, matIdBoundary,
-                                         matIdBoundary, matIdBoundary,
-                                         matIdBoundary};
-    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
-        dim, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral,
-        /*createBoundEls=*/true);
-
-    // ── 2. Atomic meshes (H(div) flux + L2 pressure) ─────────────────────
-    TPZCompMesh *cmeshFlux     = CreateFluxMesh(gmesh, dim, pOrder);
-    TPZCompMesh *cmeshPressure = CreatePressureMesh(gmesh, dim, pOrder);
-
-    // ── 3. Multiphysics mesh: physics + boundary live HERE ───────────────
+// ── MULTIPHYSICS mesh: physics + boundary live HERE ───────────────────────
+TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZGeoMesh *gmesh, int dim, int pOrder,
+                                                TPZCompMesh *cmeshFlux,
+                                                TPZCompMesh *cmeshPressure) {
     gmesh->ResetReference();
     auto *cmesh = new TPZMultiphysicsCompMesh(gmesh);
     cmesh->SetDimModel(dim);
     cmesh->SetDefaultOrder(pOrder);
 
-    auto *mat = new TPZMixedDarcyFlow(matIdDomain, dim);
+    auto *mat = new TPZMixedDarcyFlow(EDomain, dim);
     mat->SetConstantPermeability(1.);
     mat->SetForcingFunction(
         [](const TPZVec<REAL> &loc, TPZVec<STATE> &result) {
@@ -107,7 +136,7 @@ int main() {
     // imposes NORMAL FLUX. Here: zero pressure on the whole boundary.
     TPZFMatrix<STATE> val1(1, 1, 0.);
     TPZManVector<STATE, 1> val2 = {0.};
-    auto *bnd = mat->CreateBC(mat, matIdBoundary, 0, val1, val2);
+    auto *bnd = mat->CreateBC(mat, EBC, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd);
 
     // The space style MUST be set to multiphysics BEFORE
@@ -120,30 +149,30 @@ int main() {
     TPZManVector<TPZCompMesh *, 2> meshes = {cmeshFlux, cmeshPressure};
     TPZManVector<int, 2> active = {1, 1};
     cmesh->BuildMultiphysicsSpace(active, meshes);
+    return cmesh;
+}
 
-    // ── 4. Assemble and solve ────────────────────────────────────────────
-    // WARNING: the mixed system is a SADDLE POINT (indefinite) problem —
-    // ECholesky does NOT work; use ELDLt (or ELU).
-    TPZLinearAnalysis an(cmesh);
+// ── Assemble and solve ────────────────────────────────────────────────────
+// WARNING: the mixed system is a SADDLE POINT (indefinite) problem —
+// ECholesky does NOT work; use ELDLt (or ELU).
+void SolveProblem(TPZLinearAnalysis &an, TPZCompMesh *cmesh) {
     TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    strmat.SetNumThreads(nThreads);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> solver;
     solver.SetDirect(ELDLt);
     an.SetSolver(solver);
     an.Assemble();
     an.Solve();
+}
 
-    // ── 5. Post-processing (VTK) ─────────────────────────────────────────
-    // Real TPZMixedDarcyFlow names (see VariableIndex): "Pressure"
-    // (scalar), "Flux" (vector), "DivFlux" (scalar).
-    const TPZManVector<std::string, 2> scalnames = {"Pressure", "DivFlux"};
-    const TPZManVector<std::string, 1> vecnames = {"Flux"};
-    an.DefineGraphMesh(dim, scalnames, vecnames, "darcy_mixed2d.vtk");
-    an.PostProcess(/*resolution=*/1, dim);
-
-    delete cmesh;
-    delete cmeshFlux;
-    delete cmeshPressure;
-    delete gmesh;
-    return 0;
+// ── Post-processing (VTK) — pass the MULTIPHYSICS mesh, not an atomic one ─
+// Real TPZMixedDarcyFlow names (see VariableIndex): "Pressure" (scalar),
+// "Flux" (vector), "DivFlux" (scalar). Unknown names hit DebugStop.
+void PrintResults(TPZCompMesh *cmesh, const std::string &plotfile) {
+    constexpr int vtkRes{1};
+    TPZVec<std::string> fields = {"Pressure", "Flux", "DivFlux"};
+    auto vtk = TPZVTKGenerator(cmesh, fields, plotfile, vtkRes);
+    vtk.SetNThreads(nThreads);
+    vtk.Do();  // writes <plotfile>.0.vtk
 }
