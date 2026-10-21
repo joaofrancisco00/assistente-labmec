@@ -102,6 +102,8 @@ MAPA_INTENCAO_CLASSE = {
     r"condens|schur":           ["TPZCompMeshTools", "TPZCondensedCompEl", "TPZMatRed"],
     r"elastic|elasticity|elast": ["TPZElasticity2D", "TPZElasticity3D"],
     r"neumann":                 ["TPZMatLoadCasesBC"],
+    r"gmsh|\.msh\b":            ["TPZGmshReader"],
+    r"gengrid|structured grid": ["TPZGenGrid2D"],
 }
 
 HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",

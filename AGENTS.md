@@ -14,9 +14,12 @@
   ```
   Then run each binary in `reference_solutions/build_develop/` — compiling is not
   enough (e.g. PostProcessError and manual node allocation bugs only show at runtime).
+  `gmsh_reader` needs the mesh path: `./gmsh_reader ../task_11_gmsh_reader/square.msh`.
 - Regenerate only the enum values index (no Chroma reindex): `uv run indexer.py --so-enums`
 - Regenerate only the class→namespace index: `uv run indexer.py --so-namespaces`
   (needed once after pulling this change if `banco_chroma_develop/` predates it)
+- Regenerate the inheritance index after changing `build_inheritance_index`: `uv run gerar_heranca.py`
+  (the index now also records TPZ* template arguments of the bases, e.g. the `Interfaces...` pack of `TPZMatBase`)
 - Reindex the wiki after editing `wiki_neopz/wiki/**`: `uv run indexer_wiki.py`
   (rebuilds only the `neopz_wiki` collection of `banco_chroma_develop/`).
 - Benchmark, fully local and without spending Gemini quota:
