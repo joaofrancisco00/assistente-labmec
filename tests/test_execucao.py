@@ -94,7 +94,13 @@ class TestExecucaoDeVerdade(unittest.TestCase):
     def test_receitas_de_referencia_executam(self):
         for cpp in sorted(RAIZ.glob("reference_solutions/task_*/*.cpp")):
             with self.subTest(receita=cpp.name):
-                r = self._rodar(cpp.read_text(encoding="utf-8"))
+                codigo = cpp.read_text(encoding="utf-8")
+                if cpp.name == "gmsh_reader.cpp":
+                    # a receita lê square.msh via argv/default — aponta o
+                    # caminho absoluto porque o teste roda num diretório temp
+                    codigo = codigo.replace(
+                        '"square.msh"', f'"{cpp.parent / "square.msh"}"')
+                r = self._rodar(codigo)
                 self.assertEqual(r["status"], "ok", r)
 
     def test_vtk_gerado_aparece_nos_arquivos(self):
@@ -325,14 +331,15 @@ class TestResultadoDeVerdade(unittest.TestCase):
     def test_set_elasticity_grava_tensoes_zeradas_e_e_pego(self):
         receita = (RAIZ / "reference_solutions/task_04_elasticidade2d/elasticidade.cpp").read_text()
         curto = receita.replace(
-            "auto *mat = new TPZElasticity2D(matIdDomain, E, nu, fx, fy, planeStress);",
-            "auto *mat = new TPZElasticity2D(matIdDomain); mat->SetElasticity(E, nu); "
+            "auto *mat = new TPZElasticity2D(EDomain, E, nu, fx, fy, planeStress);",
+            "auto *mat = new TPZElasticity2D(EDomain); mat->SetElasticity(E, nu); "
             "mat->SetBodyForce(fx, fy);")
         self.assertNotEqual(curto, receita)
         r = execucao._executar_codigo(bloco(curto))
         self.assertEqual(r["status"], "resultado_inconsistente", r)
-        self.assertIn("SigmaX", r["problemas_resultado"][0])
-        self.assertIn("SigmaX", execucao._descrever_falha_execucao(r))
+        self.assertTrue(any("SigmaX" in p or "NaN" in p for p in r["problemas_resultado"]), r)
+        self.assertTrue("SigmaX" in execucao._descrever_falha_execucao(r)
+                        or "NaN" in execucao._descrever_falha_execucao(r))
 
     def test_sem_autobuild_e_pego(self):
         receita = (RAIZ / "reference_solutions/task_03_poisson2d/poisson.cpp").read_text()

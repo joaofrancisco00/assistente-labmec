@@ -293,6 +293,60 @@ class TestAridadeConstrutores(unittest.TestCase):
             self._aridade("pzgeom::TPZGeoQuad q(nodes, 1, gmesh);", indice), [])
 
 
+class TestVariaveisAmbiguas(unittest.TestCase):
+    """Caso real do benchmark: no esqueleto modular o mesmo nome `cmesh` é
+    ligado a TPZCompMesh numa função e a TPZMultiphysicsCompMesh em outra —
+    o primeiro binding ganhava e `cmesh->BuildMultiphysicsSpace` flagava um
+    código correto. Com vários candidatos, só reporta se TODOS reprovam."""
+    CLASSES = {"TPZCompMesh", "TPZMultiphysicsCompMesh"}
+    METODOS = {"AutoBuild", "BuildMultiphysicsSpace", "DoIt"}
+    INDICE = {
+        "TPZCompMesh": {"AutoBuild": {"min_args": 0, "max_args": 0},
+                        "DoIt": {"min_args": 3, "max_args": 3}},
+        "TPZMultiphysicsCompMesh": {"BuildMultiphysicsSpace": {"min_args": 2, "max_args": 2},
+                                    "DoIt": {"min_args": 2, "max_args": 2}},
+    }
+    CODIGO = (
+        "TPZCompMesh *CreateFluxMesh(TPZGeoMesh *gmesh) {\n"
+        "    auto *cmesh = new TPZCompMesh(gmesh);\n"
+        "    cmesh->AutoBuild();\n"
+        "    return cmesh;\n"
+        "}\n"
+        "TPZMultiphysicsCompMesh *CreateMulti(TPZGeoMesh *gmesh, TPZCompMesh *f, TPZCompMesh *p) {\n"
+        "    auto *cmesh = new TPZMultiphysicsCompMesh(gmesh);\n"
+        "    TPZManVector<TPZCompMesh *, 2> meshes = {f, p};\n"
+        "    TPZManVector<int, 2> active = {1, 1};\n"
+        "    cmesh->BuildMultiphysicsSpace(active, meshes);\n"
+        "    return cmesh;\n"
+        "}\n")
+
+    # herança real: TPZMultiphysicsCompMesh é TPZCompMesh — com ela, um bind
+    # único para TPZCompMesh flagaria BuildMultiphysicsSpace (foi o falso
+    # positivo do benchmark); a lista de candidatos é o que absolve
+    HERANCA = {"TPZMultiphysicsCompMesh": ["TPZCompMesh"]}
+
+    def _chamadas(self, codigo):
+        return find_suspicious_method_calls(
+            codigo, self.METODOS, self.CLASSES, self.INDICE, self.HERANCA)
+
+    def test_metodo_aceito_por_um_dos_candidatos_passa(self):
+        suspeitos_nome, aridade = self._chamadas(self.CODIGO)
+        self.assertEqual(suspeitos_nome, [])
+        self.assertEqual(aridade, [])
+
+    def test_metodo_inventado_flaga_uma_vez(self):
+        codigo = self.CODIGO + "    cmesh->MetodoInventado();\n"
+        suspeitos_nome, _ = self._chamadas(codigo)
+        self.assertEqual(suspeitos_nome, [("TPZCompMesh", "MetodoInventado")])
+
+    def test_aridade_aceita_por_um_candidato_passa(self):
+        # DoIt existe nos dois com aridades diferentes: a chamada só bate
+        # com TPZMultiphysicsCompMesh → ambiguidade resolve a favor
+        codigo = self.CODIGO + "    cmesh->DoIt(1, 2);\n"
+        _, aridade = self._chamadas(codigo)
+        self.assertEqual(aridade, [])
+
+
 class TestClassesEmComentarios(unittest.TestCase):
     def test_classe_em_comentario_nao_conta(self):
         # Regressão real: a receita de elasticidade 3D cita TPZElasticity2D num

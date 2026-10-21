@@ -90,6 +90,60 @@ class TestPedidoMisto(unittest.TestCase):
         self.assertEqual(_avisos(codigo, "Solve Poisson with mixed boundary conditions"), [])
 
 
+class TestPedidoPoisson(unittest.TestCase):
+    PEDIDO = ("Write complete C++ code with NeoPZ to solve a 3D Poisson problem "
+              "on a unit cube meshed with hexahedra.")
+    ELASTICIDADE = "```cpp\nauto *mat = new TPZElasticity3D(1, E, nu, force);\n```"
+    POISSON = "```cpp\nauto *mat = new TPZMatPoisson<STATE>(1, 3);\n```"
+
+    def test_material_de_elasticidade_em_pedido_poisson_e_reprovado(self):
+        # Caso real do benchmark poisson_3d_hexaedros: o material de
+        # elasticidade compilava e passava — só a comparação com o pedido
+        # revela o erro
+        avisos = _avisos(self.ELASTICIDADE, self.PEDIDO)
+        self.assertTrue(any("TPZMatPoisson" in a for a in avisos), avisos)
+
+    def test_material_poisson_passa(self):
+        self.assertEqual(_avisos(self.POISSON, self.PEDIDO), [])
+
+    def test_pedido_de_elasticidade_nao_dispara(self):
+        self.assertEqual(_avisos(self.ELASTICIDADE,
+                                 "Solve a 3D linear elasticity problem"), [])
+
+
+class TestMalhaMisturadaAlternativa(unittest.TestCase):
+    def test_hdiv_creator_sem_buildmultiphysics_passa(self):
+        # TPZHDivApproxCreator::CreateApproximationSpace() monta a malha
+        # multifísica internamente — exigir BuildMultiphysicsSpace era falso
+        # positivo para esse caminho
+        codigo = ("```cpp\nauto *mat = new TPZMixedDarcyFlow(1, 2);\n"
+                  "TPZHDivApproxCreator creator(gmesh);\n"
+                  "auto *cmesh = creator.CreateApproximationSpace();\n"
+                  "stepsolver.SetDirect(ELDLt);\n```\n")
+        self.assertEqual(_avisos(codigo, None), [])
+
+
+class TestPedidoDarcyH1(unittest.TestCase):
+    PEDIDO = ("Write complete C++ code with NeoPZ to solve a 2D Darcy "
+              "problem in the H1 space.")
+    HIBRIDO = "```cpp\nauto *mat = new TPZHybridDarcyFlow(1, 2);\n```"
+    MISTO = "```cpp\nauto *mat = new TPZMixedDarcyFlow(1, 2);\n```"
+
+    def test_material_hibrido_em_pedido_h1_e_reprovado(self):
+        # Caso real do benchmark darcy_h1_2d: o modelo escolheu
+        # TPZHybridDarcyFlow e ficou preso tentando SetConstantPermeability
+        avisos = _avisos(self.HIBRIDO, self.PEDIDO)
+        self.assertTrue(any("TPZDarcyFlow" in a for a in avisos), avisos)
+
+    def test_pedido_misto_nao_dispara(self):
+        # a regra do H1 não pode disparar num pedido de formulação mista —
+        # o snippet ainda acusa as regras de malha multifísica (válidas),
+        # só o aviso que manda trocar para TPZDarcyFlow não pode aparecer
+        avisos = _avisos(self.MISTO,
+                         "Solve a 2D Darcy problem in the mixed formulation")
+        self.assertFalse(any("H1 space" in a for a in avisos), avisos)
+
+
 class TestPedidoNoLoop(unittest.TestCase):
     def test_retry_recebe_a_divergencia_com_o_pedido(self):
         llm = _LLMFalso(CODIGO_CONTINUO, CODIGO_HDIV)

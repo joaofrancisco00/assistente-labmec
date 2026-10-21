@@ -543,8 +543,12 @@ def remover_comentarios(code: str) -> str:
 
 def find_tpz_classes_in_code(code: str) -> set:
     """Extrai todos os identificadores TPZxxx usados em um trecho de código.
-    Comentários não contam — uma classe só citada num comentário não é uso."""
-    return set(re.findall(r'\bTPZ[A-Z]\w+', remover_comentarios(code)))
+    Comentários e linhas de #include não contam — uma classe só citada num
+    comentário ou no nome do header (ex: "TPZEnumApproxFamily.h", header de
+    enum sem classe) não é uso."""
+    sem_includes = re.sub(r'^\s*#\s*include\s*[<"][^>"]+[>"]', '',
+                          remover_comentarios(code), flags=re.M)
+    return set(re.findall(r'\bTPZ[A-Z]\w+', sem_includes))
 
 
 # ── Validação de MÉTODOS (não só classe/header) ─────────────────────────────────
@@ -629,12 +633,29 @@ _DECL_HERANCA_RE = re.compile(
     r'(?:public|private|protected)\s+([\w<>:,\s ]+)\{?')
 
 
+def _split_bases(lista: str) -> list:
+    """Divide a lista de bases na vírgula de nível zero — vírgulas DENTRO de
+    `<...>` pertencem a argumentos de template (ex: `TPZMatBase<STATE,
+    TPZMatSingleSpaceT<STATE>, TPZIsotropicPermeability>` é UMA base)."""
+    partes, depth, inicio = [], 0, 0
+    for i, c in enumerate(lista):
+        if c == '<':
+            depth += 1
+        elif c == '>':
+            depth = max(0, depth - 1)
+        elif c == ',' and depth == 0:
+            partes.append(lista[inicio:i])
+            inicio = i + 1
+    partes.append(lista[inicio:])
+    return partes
+
+
 def _resolver_nome_base(base: str) -> str:
     """Normaliza uma base da lista de herança: remove especificador de acesso
     (`public TPZA` → `TPZA`), parâmetros de template (`TPZFoo<T>` → `TPZFoo`)
     e qualificador de namespace (`NS::TPZFoo` → `TPZFoo`)."""
     base = re.sub(r'\b(?:public|private|protected|virtual)\b', '', base).strip()
-    base = base.split('<', 1)[0].split('::')[-1].strip()
+    base = base.split('<', 1)[0].split('::')[-1].strip().rstrip('>').strip()
     return base
 
 
@@ -653,7 +674,18 @@ def build_inheritance_index(base_path: Path) -> dict:
             continue
         for m in _DECL_HERANCA_RE.finditer(content):
             cls, lista = m.group(1), m.group(2)
-            bases = [b for b in (_resolver_nome_base(b) for b in lista.split(',')) if b]
+            bases = [b for b in (_resolver_nome_base(b) for b in _split_bases(lista)) if b]
+            # O NeoPZ injeta interfaces pela pack `Interfaces...` de
+            # TPZMatBase: `class TPZMixedDarcyFlow : public TPZMatBase<STATE,
+            # ..., TPZIsotropicPermeability>` herda SetConstantPermeability
+            # por esse caminho, invisível para o grafo de bases. Os nomes
+            # TPZ* dos argumentos de template viram arestas extras — a
+            # margem erra para o permissivo, que é o lado seguro aqui.
+            for base_crua in _split_bases(lista):
+                nome = _resolver_nome_base(base_crua)
+                for extra in re.findall(r'TPZ\w+', base_crua):
+                    if extra != nome and extra not in bases:
+                        bases.append(extra)
             if bases:
                 existentes = indice.setdefault(cls, [])
                 for b in bases:
@@ -726,21 +758,32 @@ _CTOR_TAIL_DEF_RE = re.compile(r'\s*(?:const\s*)?\{')
 
 def _bind_variables_to_classes(code: str) -> dict:
     """
-    Heurística leve para inferir {nome_da_variavel: ClasseTPZ} a partir de
-    declarações no próprio trecho de código gerado. Não é um parser de C++
-    completo (não resolve typedefs locais, não segue reatribuições) — é
-    suficiente para os padrões de código NeoPZ mais comuns (ver
+    Heurística leve para inferir {nome_da_variavel: [ClasseTPZ, ...]} a partir
+    de declarações no próprio trecho de código gerado. Não é um parser de C++
+    completo (não resolve typedefs locais, não segue reatribuições nem
+    escopos) — é suficiente para os padrões de código NeoPZ mais comuns (ver
     reference_solutions/task_03_poisson2d/poisson.cpp).
+
+    O mesmo nome pode ser ligado a classes diferentes em funções diferentes
+    (ex: `cmesh` como TPZCompMesh numa função e TPZMultiphysicsCompMesh em
+    outra no esqueleto modular) — por isso o valor é uma lista e quem checa
+    decide como tratar a ambiguidade.
     """
     bindings = {}
+
+    def _bind(var: str, cls: str) -> None:
+        classes = bindings.setdefault(var, [])
+        if cls not in classes:
+            classes.append(cls)
+
     # ordem: dos mais específicos para os mais genéricos, para que um bind
     # mais específico não seja sobrescrito por um genérico depois
     for regex in (_BIND_AUTO_NEW_RE,):
         for var, cls in regex.findall(code):
-            bindings.setdefault(var, cls)
+            _bind(var, cls)
     for regex in (_BIND_AUTOPOINTER_RE, _BIND_POINTER_REF_RE, _BIND_STACK_VALUE_RE, _BIND_BARE_VALUE_RE):
         for cls, var in regex.findall(code):
-            bindings.setdefault(var, cls)
+            _bind(var, cls)
     return bindings
 
 
@@ -883,15 +926,13 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
     seen_nome = set()
 
     def _checar(cls: str, method: str, open_pos: int):
-        key = (cls, method)
+        """Devolve ("nome", (cls, method)) ou ("aridade", msg) se a chamada
+        seria suspeita para `cls`, ou None se ela é legítima."""
         if method not in method_whitelist:
-            if key not in seen_nome:
-                seen_nome.add(key)
-                suspeitos_nome.append(key)
-            return
+            return ("nome", (cls, method))
         metodos_classe = class_methods_index.get(cls) if class_methods_index else None
         if metodos_classe is None:
-            return  # sem índice por classe → comportamento antigo (whitelist global basta)
+            return None  # sem índice por classe → comportamento antigo (whitelist global basta)
         if method not in metodos_classe:
             # O método existe no NeoPZ (whitelist global) mas NÃO nesta classe.
             # Só é legítimo se vier de um ancestral — `an.SetForcingFunction`
@@ -900,29 +941,45 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
             # mantém o comportamento antigo (não sinaliza).
             if (inheritance_index
                     and not _metodo_na_hierarquia(cls, method, class_methods_index,
-                                                  inheritance_index)
-                    and key not in seen_nome):
-                seen_nome.add(key)
-                suspeitos_nome.append(key)
-            return
+                                                  inheritance_index)):
+                return ("nome", (cls, method))
+            return None
         entrada = metodos_classe[method]
         call_args = _count_call_args(code, open_pos)
         if call_args < entrada["min_args"] or call_args > entrada["max_args"]:
-            msg = _msg_erro_aridade(cls, method, entrada, call_args)
-            if msg not in suspeitos_aridade:
-                suspeitos_aridade.append(msg)
+            return ("aridade", _msg_erro_aridade(cls, method, entrada, call_args))
+        return None
+
+    def _registrar(resultado) -> None:
+        if resultado is None:
+            return
+        tipo, valor = resultado
+        if tipo == "nome":
+            if valor not in seen_nome:
+                seen_nome.add(valor)
+                suspeitos_nome.append(valor)
+        elif valor not in suspeitos_aridade:
+            suspeitos_aridade.append(valor)
 
     for m in _METHOD_CALL_RE.finditer(code):
         var, method = m.group(1), m.group(2)
         open_pos = m.end() - 1
-        cls = bindings.get(var)
-        if not cls:
+        classes = bindings.get(var)
+        if not classes:
             continue
         # construtor/destrutor explícito (ex: `gmesh->~TPZGeoMesh()`, raro mas
         # válido) ou chamada cujo "método" é na verdade o nome da classe
-        if method in (cls, f"~{cls}"):
+        if any(method in (cls, f"~{cls}") for cls in classes):
             continue
-        _checar(cls, method, open_pos)
+        if len(classes) == 1:
+            _registrar(_checar(classes[0], method, open_pos))
+            continue
+        # Variável ambígua (mesmo nome ligado a classes diferentes em funções
+        # diferentes): só sinaliza se a chamada falhar para TODOS os
+        # candidatos — aceita por um deles já basta para absolver.
+        resultados = [_checar(cls, method, open_pos) for cls in classes]
+        if all(r is not None for r in resultados):
+            _registrar(resultados[0])
 
     for m in _QUALIFIED_CALL_RE.finditer(code):
         cls = m.group(1)
@@ -932,7 +989,7 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
             continue  # classe já é desconhecida — isso é alucinação de classe, não de método
         if method in (cls, f"~{cls}"):
             continue
-        _checar(cls, method, open_pos)
+        _registrar(_checar(cls, method, open_pos))
 
     _checar_construtores(code, class_whitelist, class_methods_index,
                          suspeitos_aridade)

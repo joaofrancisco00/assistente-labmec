@@ -13,9 +13,9 @@ rules:
 
   - nome: "Mixed Darcy - Multiphysics Mesh"
     padrao: '\bTPZMixedDarcyFlow\b|\bTPZMultiphysicsCompMesh\b'
-    requer: '\bBuildMultiphysicsSpace\b'
+    requer: '\bBuildMultiphysicsSpace\b|\bCreateApproximationSpace\b'
     incompativel_com: null
-    aviso: "In the mixed formulation (TPZMixedDarcyFlow / TPZMultiphysicsCompMesh), you MUST use cmesh->BuildMultiphysicsSpace() and not AutoBuild()."
+    aviso: "In the mixed formulation (TPZMixedDarcyFlow / TPZMultiphysicsCompMesh), you MUST use cmesh->BuildMultiphysicsSpace() and not AutoBuild() (or let TPZHDivApproxCreator::CreateApproximationSpace() build it)."
 
   - nome: "Mixed Darcy - Solver"
     padrao: '\bTPZMixedDarcyFlow\b'
@@ -55,3 +55,17 @@ rules:
     requer: '\bTPZMultiphysicsCompMesh\b|\bTPZHDivApproxCreator\b'
     incompativel_com: null
     aviso: "The request is for a mixed formulation, which needs a flux (H(div)) and a pressure mesh combined in a TPZMultiphysicsCompMesh (or TPZHDivApproxCreator). The code builds a single-space mesh."
+
+  - nome: "Request for Poisson - no elasticity material"
+    pergunta: '(?i)\bpoisson\b|\blaplac'
+    padrao: null
+    requer: null
+    incompativel_com: '\bTPZElasticity[23]D\b|\bTPZMixedElasticity\w*\b'
+    aviso: "The request is for a Poisson problem, but the code uses an elasticity material. Use TPZMatPoisson<STATE>(id, dim) (include \"Poisson/TPZMatPoisson.h\")."
+
+  - nome: "Request for H1 Darcy - TPZDarcyFlow"
+    pergunta: '(?i)\bdarcy\b.*\bh\s*1\b|\bh\s*1\b.*\bdarcy\b'
+    padrao: null
+    requer: null
+    incompativel_com: '\bTPZHybridDarcyFlow\b|\bTPZMixedDarcyFlow\b'
+    aviso: "The request is for Darcy in the H1 space: use TPZDarcyFlow (include \"DarcyFlow/TPZDarcyFlow.h\") on a single continuous mesh. TPZHybridDarcyFlow and TPZMixedDarcyFlow are for combined/mixed spaces."

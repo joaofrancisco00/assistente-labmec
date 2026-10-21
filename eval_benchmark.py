@@ -29,6 +29,7 @@ from pathlib import Path
 from pipeline import (
     gerar_codigo,
 )
+from pipeline.cpp_parser import remover_comentarios
 
 # ── Casos de benchmark ─────────────────────────────────────────────────────────
 # Cada check recebe o dict `resultado` de gerar_codigo (a resposta final está
@@ -44,8 +45,10 @@ def _sem_receita_colada(resposta: str) -> bool:
     receita completa do Poisson como "exemplo". Um exemplo CURTO com main é
     aceitável (até desejável); o que não pode é a receita inteira — detectada
     pela impressão digital do pipeline completo (2+ marcadores juntos).
+    Os marcadores acompanham a forma ATUAL das receitas (pós-processamento
+    via TPZVTKGenerator — `vtk.Do()` —, não mais DefineGraphMesh).
     """
-    marcadores = ("CreateGeoMeshOnGrid", "DefineGraphMesh", "SetForcingFunction")
+    marcadores = ("CreateGeoMeshOnGrid", "InsertMaterialObject", "vtk.Do()")
     return sum(m in resposta for m in marcadores) < 2
 
 
@@ -88,8 +91,10 @@ _CTOR_ELAST_COMPLETO_RE = re.compile(r"TPZElasticity2D\s*\(([^)]*,){5}[^)]*\)")
 
 
 def _elasticidade_bem_construida(resposta: str) -> bool:
-    return (_CTOR_ELAST_COMPLETO_RE.search(resposta) is not None
-            and "SetElasticity" not in resposta)
+    # comentários (ex.: avisos copiados da receita) não podem reprovar o check
+    limpo = remover_comentarios(resposta)
+    return (_CTOR_ELAST_COMPLETO_RE.search(limpo) is not None
+            and "SetElasticity" not in limpo)
 
 
 def _compilou(r: dict) -> bool:
@@ -164,7 +169,8 @@ CASOS = [
                      "problem. Show the complete code with all the necessary includes."),
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
-            "material_correto":    lambda r: "TPZMatPoisson" in r["resposta"],
+            "material_correto":    lambda r: re.search(r"new\s+TPZMatPoisson\s*<", r["resposta"]) is not None,
+            "sem_elasticidade":    lambda r: "TPZElasticity" not in r["resposta"],
             "include_qualificado": lambda r: "Poisson/TPZMatPoisson.h" in r["resposta"],
             "sem_api_antiga":      lambda r: ("TPZDummyFunction" not in r["resposta"]
                                               and "TPZMatPlaca2" not in r["resposta"]
@@ -199,8 +205,9 @@ CASOS = [
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "material_misto":      lambda r: "TPZMixedDarcyFlow" in r["resposta"],
-            "malha_multifisica":   lambda r: ("TPZMultiphysicsCompMesh" in r["resposta"]
-                                              and "BuildMultiphysicsSpace" in r["resposta"]),
+            "malha_multifisica":   lambda r: (("TPZMultiphysicsCompMesh" in r["resposta"]
+                                              and "BuildMultiphysicsSpace" in r["resposta"])
+                                              or "TPZHDivApproxCreator" in r["resposta"]),
             "solver_ponto_de_sela": lambda r: "ELDLt" in r["resposta"],
             "sem_cfd":             lambda r: "TPZFlowCompMesh" not in r["resposta"],
             "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
@@ -227,6 +234,40 @@ CASOS = [
             "permeabilidade":      lambda r: "SetConstantPermeability" in r["resposta"],
             "sem_alegacao_falsa":  lambda r: _sem_alegacao_de_compilacao(r["resposta"]),
             "max_2_tentativas":    lambda r: r["tentativas"] <= 2,
+        },
+    },
+    {
+        "nome": "darcy_misto_creator",
+        "programa": True,
+        "receita": True,
+        "pergunta": ("Write complete C++ code with NeoPZ to solve a "
+                     "2D mixed Darcy problem using TPZHDivApproxCreator to "
+                     "build the approximation space."),
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "usa_creator":         lambda r: ("TPZHDivApproxCreator" in r["resposta"]
+                                              and "CreateApproximationSpace" in r["resposta"]),
+            "material_misto":      lambda r: "TPZMixedDarcyFlow" in r["resposta"],
+            "solver_ponto_de_sela": lambda r: "ELDLt" in r["resposta"],
+            "compilou":            _compilou,
+            "executou":            _executou,
+        },
+    },
+    {
+        "nome": "gmsh_leitura",
+        "programa": True,
+        "receita": True,
+        "pergunta": ("Write complete C++ code with NeoPZ that reads a 2D mesh "
+                     "from a Gmsh .msh file with TPZGmshReader, gets the "
+                     "material ids from the physical names, and solves a "
+                     "Poisson problem on it."),
+        "checks": {
+            "validacao_limpa":     lambda r: r["valido"],
+            "usa_gmsh_reader":     lambda r: "TPZGmshReader" in r["resposta"],
+            "usa_physical_names":  lambda r: "GetDimNamePhysical" in r["resposta"],
+            "material_correto":    lambda r: re.search(r"new\s+TPZMatPoisson\s*<",
+                                                       r["resposta"]) is not None,
+            "compilou":            _compilou,
         },
     },
     {
@@ -260,7 +301,8 @@ CASOS = [
         "checks": {
             "validacao_limpa":     lambda r: r["valido"],
             "compilou":            _compilou,
-            "material_correto":    lambda r: "TPZMatPoisson" in r["resposta"],
+            "material_correto":    lambda r: re.search(r"new\s+TPZMatPoisson\s*<", r["resposta"]) is not None,
+            "sem_elasticidade":    lambda r: "TPZElasticity" not in r["resposta"],
             "malha_hexaedrica":    lambda r: ("MMeshType::EHexahedral" in r["resposta"]
                                               or "TPZAcademicGeoMesh::EHexa" in r["resposta"]),
             "dimensao_3d":         lambda r: _DIM_3_RE.search(r["resposta"]) is not None,
