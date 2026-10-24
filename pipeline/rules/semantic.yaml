@@ -58,6 +58,7 @@ rules:
 
   - nome: "Request for Poisson - no elasticity material"
     pergunta: '(?i)\bpoisson\b|\blaplac'
+    pergunta_ignorar: '(?i)poisson\W{0,2}s?\s+(ratio|coefficient)|(coeficiente|raz[ãa]o|m[óo]dulo)\s+de\s+poisson'
     padrao: null
     requer: null
     incompativel_com: '\bTPZElasticity[23]D\b|\bTPZMixedElasticity\w*\b'

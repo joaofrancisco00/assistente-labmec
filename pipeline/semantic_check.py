@@ -42,7 +42,11 @@ def validar_semantica(codigo: str, pergunta: str = None) -> list[str]:
 
     for regra in _carregar_regras():
         if regra.get("pergunta"):
-            if not pedido_de_codigo or not re.search(regra["pergunta"], pergunta):
+            # pergunta_ignorar remove menções que a regra não deve ler
+            # (ex: "Poisson's ratio" não é pedido de problema de Poisson)
+            texto = (re.sub(regra["pergunta_ignorar"], " ", pergunta)
+                     if regra.get("pergunta_ignorar") and pergunta else pergunta)
+            if not pedido_de_codigo or not re.search(regra["pergunta"], texto):
                 continue
         if regra.get("padrao") and not re.search(regra["padrao"], codigo):
             continue

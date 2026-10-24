@@ -111,6 +111,31 @@ class TestPedidoPoisson(unittest.TestCase):
                                  "Solve a 3D linear elasticity problem"), [])
 
 
+class TestRazaoDePoisson(unittest.TestCase):
+    # "Poisson's ratio" / "coeficiente de Poisson" num pedido de
+    # elasticidade NÃO é pedido de problema de Poisson — a regra mandava
+    # trocar TPZElasticity2D por TPZMatPoisson num código correto.
+    ELAST2D = "```cpp\nauto *mat = new TPZElasticity2D(1, 1000., 0.3, 0., 0., 1);\n```"
+
+    def test_razao_de_poisson_em_pedido_de_elasticidade_nao_dispara(self):
+        for pergunta in (
+                "2D elasticity with Young modulus 1000 and Poisson's ratio 0.3",
+                "2D elasticity with Young modulus 1000 and Poisson ratio 0.3",
+                "elasticidade com coeficiente de Poisson 0.3"):
+            with self.subTest(pergunta=pergunta):
+                self.assertEqual(_avisos(self.ELAST2D, pergunta), [])
+
+    def test_pedido_de_poisson_de_verdade_continua_disparando(self):
+        self.assertTrue(_avisos(self.ELAST2D, "Solve a Poisson problem"))
+
+    def test_equacao_de_poisson_sobrevive_ao_filtro(self):
+        # a menção "Poisson equation" sobrevive ao pergunta_ignorar —
+        # só a "Poisson's ratio" é removida
+        avisos = _avisos(self.ELAST2D,
+                         "Solve the Poisson equation for a plate with Poisson's ratio 0.3")
+        self.assertTrue(any("TPZMatPoisson" in a for a in avisos), avisos)
+
+
 class TestMalhaMisturadaAlternativa(unittest.TestCase):
     def test_hdiv_creator_sem_buildmultiphysics_passa(self):
         # TPZHDivApproxCreator::CreateApproximationSpace() monta a malha
