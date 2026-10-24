@@ -946,11 +946,13 @@ class TestCardsGarantidos(unittest.TestCase):
         self.assertIn("TPZCondensedCompEl", w_docs[0].page_content)
 
     def test_card_nao_entra_sem_classe_citada(self):
+        # Pergunta sem nome de classe nem palavra do mapa de intenção:
+        # nada aponta TPZCondensedCompEl, então o card é filtrado
         card = self._card("TPZCondensedCompEl")
         prosa = Document_wiki("conceito", "condensacao.md")
         wiki_db = MockDB(docs_sim=[card], docs_mmr=[prosa])
         _, _, w_docs, _ = self._contexto(
-            "What is static condensation?", wiki_db)
+            "What is the computational mesh?", wiki_db)
         self.assertNotIn("doc_card", {d.metadata.get("tipo") for d in w_docs})
 
     def test_card_nao_conta_no_k_wiki(self):
@@ -1025,6 +1027,24 @@ class TestClassesPorIntencao(unittest.TestCase):
         classes = pipeline.retrieval._classes_por_intencao(
             "export the solution to vtk")
         self.assertIn("TPZVTKGenerator", classes)
+
+    def test_radicas_casam_palavras_derivadas(self):
+        # O \b no fim do padrão impedia "condens" de casar "condensation" —
+        # os radicais do mapa nunca disparavam
+        classes = pipeline.retrieval._classes_por_intencao(
+            "using static condensation")
+        self.assertIn("TPZCompMeshTools", classes)
+
+    def test_refinamento_deriva(self):
+        for pergunta in ("refines it uniformly twice", "refining the mesh"):
+            with self.subTest(pergunta=pergunta):
+                self.assertIn("TPZCheckGeom",
+                              pipeline.retrieval._classes_por_intencao(pergunta))
+
+    def test_elastostatics_deriva_de_elast(self):
+        self.assertIn("TPZElasticity2D", pipeline.retrieval._classes_por_intencao(
+            "plane elastostatics"))
+
 
 
 class TestSleepSoParaAPI(unittest.TestCase):

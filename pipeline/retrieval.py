@@ -175,7 +175,7 @@ def _classes_por_intencao(pergunta: str) -> set:
     TPZVTKGenerator pelo nome."""
     classes = set()
     for kw, lista in MAPA_INTENCAO_CLASSE.items():
-        if re.search(rf"\b(?:{kw})\b", pergunta, re.IGNORECASE):
+        if re.search(rf"\b(?:{kw})", pergunta, re.IGNORECASE):
             classes.update(lista)
     return classes
 
