@@ -62,12 +62,46 @@ _DIAG_ALUCINACAO = (
     re.compile(r"use of undeclared identifier 'TPZ\w+'"),
 )
 
+# Erros de símbolo não declarado citando nome NÃO-TPZ são artefato do recorte
+# (a variável foi definida num trecho que o modelo não colou). Nome TPZ
+# continua sendo alucinação (ver _DIAG_ALUCINACAO).
+_ARTEFATO_RECORTE_RE = re.compile(
+    r"^'(?!TPZ)[^']+' was not declared in this scope"
+    r"|use of undeclared identifier '(?!TPZ)")
+
 _LINHA_ERRO_RE = re.compile(
     r'^[^\n]*?:\d+:(?:\d+:)?\s*(?:fatal\s+)?error:\s*(.+)$', re.MULTILINE)
 
 
 def _erro_denuncia_alucinacao(mensagem: str) -> bool:
     return any(p.search(mensagem) for p in _DIAG_ALUCINACAO)
+
+
+def _erro_relevante(mensagem: str, completo: bool) -> bool:
+    """Erro que aponta problema real no código, não artefato do recorte.
+    Além dos diagnósticos de API inexistente, qualquer erro que cite um
+    tipo TPZ conta (ex: assinatura errada contra TPZMatrixSolver) — desde
+    que não seja símbolo não-declarado de nome comum."""
+    return (completo or _erro_denuncia_alucinacao(mensagem)
+            or (re.search(r"\bTPZ\w+", mensagem)
+                and not _ARTEFATO_RECORTE_RE.search(mensagem)))
+
+
+# Variáveis convencionais dos exemplos/tutoriais NeoPZ que os snippets usam
+# sem declarar ("assumindo cmesh = TPZCompMesh"). O stub `extern` deixa o
+# g++ checar os métodos chamados nelas em vez de tudo virar artefato.
+_STUBS_CONVENCIONAIS = {
+    "cmesh":    ("TPZCompMesh *",     "pzcmesh.h"),
+    "gmesh":    ("TPZGeoMesh *",      "pzgmesh.h"),
+    "an":       ("TPZLinearAnalysis", "TPZLinearAnalysis.h"),
+    "analysis": ("TPZLinearAnalysis", "TPZLinearAnalysis.h"),
+    "gel":      ("TPZGeoEl *",        "pzgeoel.h"),
+    "cel":      ("TPZCompEl *",       "pzcompel.h"),
+}
+
+_STUB_NDECL_RE = re.compile(
+    r"'(\w+)' was not declared in this scope"
+    r"|use of undeclared identifier '(\w+)'")
 
 
 def _neopz_prefix():
@@ -125,27 +159,44 @@ def _compilar_codigo(resposta: str, timeout: int = TIMEOUT_COMPILACAO) -> dict:
         return {"status": "indisponivel", "erros": [], "ignorados": 0,
                 "motivo": "the installation include path could not be read"}
 
-    tu = _montar_tu(codigo)
-    with tempfile.TemporaryDirectory() as tmp:
-        fonte = Path(tmp) / "gerado.cpp"
-        fonte.write_text(tu, encoding="utf-8")
-        cmd = [compilador, "-fsyntax-only", "-std=gnu++17", "-w",
-               f"-fmax-errors={MAX_ERROS_RELATADOS * 2}",
-               *flags_include, str(fonte)]
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return {"status": "timeout", "erros": [], "ignorados": 0}
+    completo = _programa_completo(resposta)
+
+    def _rodar(tu: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            fonte = Path(tmp) / "gerado.cpp"
+            fonte.write_text(tu, encoding="utf-8")
+            cmd = [compilador, "-fsyntax-only", "-std=gnu++17", "-w",
+                   f"-fmax-errors={MAX_ERROS_RELATADOS * 2}",
+                   *flags_include, str(fonte)]
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+    try:
+        proc = _rodar(_montar_tu(codigo))
+        if proc.returncode != 0 and not completo:
+            # Fragmento com variável convencional não declarada: recompila
+            # com stub `extern` para os erros seguintes (ex: método
+            # inventado nela) deixarem de ser artefato do recorte.
+            nomes = {n for par in _STUB_NDECL_RE.findall(proc.stderr)
+                     for n in par if n in _STUBS_CONVENCIONAIS}
+            if nomes:
+                extras = sorted({_STUBS_CONVENCIONAIS[n][1] for n in nomes})
+                externs = [f"extern {_STUBS_CONVENCIONAIS[n][0]}{n};"
+                           for n in sorted(nomes)]
+                tu_stub = ("\n".join(f'#include "{h}"' for h in extras)
+                           + "\n" + "\n".join(externs)
+                           + "\n" + _montar_tu(codigo))
+                proc = _rodar(tu_stub)
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "erros": [], "ignorados": 0}
 
     if proc.returncode == 0:
         return {"status": "ok", "erros": [], "ignorados": 0}
 
     mensagens = _LINHA_ERRO_RE.findall(proc.stderr)
-    completo = _programa_completo(resposta)
     relevantes, ignorados = [], 0
     for msg in mensagens:
         msg = msg.strip()
-        if completo or _erro_denuncia_alucinacao(msg):
+        if _erro_relevante(msg, completo):
             if msg not in relevantes:
                 relevantes.append(msg)
         else:

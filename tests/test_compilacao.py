@@ -155,14 +155,44 @@ class TestCompilacaoDeVerdade(unittest.TestCase):
         r = pipeline._compilar_codigo(bloco(codigo))
         self.assertEqual(r["status"], "ok", r["erros"])
 
-    def test_variavel_de_fora_do_recorte_nao_vira_alucinacao(self):
-        # O falso positivo que mataria a ideia: o trecho usa uma variável que
-        # o modelo definiu num bloco anterior da explicação. Não compila, mas
-        # NÃO é alucinação — precisa sair como 'inconclusivo', nunca 'erros'
+    def test_variavel_convencional_ganha_stub_e_compila(self):
+        # O snippet diz "assumindo gmesh = TPZGeoMesh" sem declarar: o stub
+        # `extern` deixa o g++ checar a chamada em vez de tudo virar
+        # artefato do recorte — e a chamada é legítima, então 'ok'
         codigo = '#include "pzgmesh.h"\ngmesh->BuildConnectivity();'
+        r = pipeline._compilar_codigo(bloco(codigo))
+        self.assertEqual(r["status"], "ok", r["erros"])
+
+    def test_variavel_desconhecida_continua_inconclusiva(self):
+        # Nome fora do mapa de stubs convencionais: sem declaração possível,
+        # segue artefato do recorte — 'inconclusivo', nunca 'erros'
+        codigo = '#include "pzgmesh.h"\nmalha->BuildConnectivity();'
         r = pipeline._compilar_codigo(bloco(codigo))
         self.assertEqual(r["status"], "inconclusivo", r["erros"])
         self.assertGreater(r["ignorados"], 0)
+
+    def test_metodo_inventado_em_stub_e_pego(self):
+        # Sem o stub, 'cmesh' não declarado virava artefato e o método
+        # inventado (AddConnect) passava batido como 'inconclusivo'
+        codigo = '#include "pzcmesh.h"\ncmesh->AddConnect(nullptr);'
+        r = pipeline._compilar_codigo(bloco(codigo))
+        self.assertEqual(r["status"], "erros")
+        self.assertTrue(any("AddConnect" in e for e in r["erros"]), r["erros"])
+
+    def test_erro_citando_tipo_tpz_nao_e_artefato(self):
+        # "cannot convert 'int' to 'const TPZMatrixSolver<double>&'" não é
+        # diagnóstico de alucinação nem símbolo não-declarado — antes virava
+        # 'inconclusivo' e o selo saía em cima de código errado
+        codigo = ('#include "pzstepsolver.h"\n'
+                  '#include "TPZLinearAnalysis.h"\n'
+                  'void Configura(TPZLinearAnalysis &an) {\n'
+                  '    TPZStepSolver<STATE> cg;\n'
+                  '    cg.SetCG(10, 1, 1e-8, 0);\n'
+                  '    an.SetSolver(cg);\n'
+                  '}')
+        r = pipeline._compilar_codigo(bloco(codigo))
+        self.assertEqual(r["status"], "erros", r)
+        self.assertTrue(any("TPZMatrixSolver" in e for e in r["erros"]), r["erros"])
 
     PROGRAMA_SEM_INCLUDE = ('#include "pzgmesh.h"\n'
                             '#include "TPZAcademicGeoMesh.h"\n'
