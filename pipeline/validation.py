@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from .cpp_parser import (
+    find_defined_tpz_classes,
     find_enum_value_uses,
     find_tpz_classes_in_code,
     find_suspicious_method_calls,
@@ -12,6 +13,7 @@ from .config import (
     HEADERS_SISTEMA,
 )
 from .compilation import _extrair_blocos_codigo, _neopz_prefix, _include_flags
+from .retrieval import _pergunta_e_explicativa
 
 def _resposta_contem_codigo(resposta: str) -> bool:
     if "```" in resposta:
@@ -112,6 +114,32 @@ def _validar_includes_por_classe(codigo: str, class_header_index: dict, collisio
         if includes_atuais.get(Path(caminho).name) != forma_certa:
             faltando[classe] = forma_certa
     return faltando
+
+def _classificar_classes_definidas(codigo: str, whitelist: set, pergunta: str = None) -> tuple:
+    """Separa as classes TPZ* definidas no corpo da resposta em 3 casos:
+    (A) nome já existe no NeoPZ → redeclaradas (erro: não redeclarar);
+    (B) derivada de base real e não citada na pergunta → "classe do usuário",
+        não é alucinação;
+    (C) fachada sem base real, ou citada na pergunta como se fosse NeoPZ →
+        continua alucinação (fica de fora do retorno).
+    Retorna (usuario: {nome: info}, redeclaradas: [nomes])."""
+    fonte = _extrair_blocos_codigo(codigo) or codigo
+    definidas = find_defined_tpz_classes(fonte)
+    if not definidas:
+        return {}, []
+    citadas = find_tpz_classes_in_code(pergunta or "")
+    whitelist = whitelist or set()
+    usuario, redeclaradas = {}, []
+    for nome, info in definidas.items():
+        if nome in whitelist:
+            # Só em pedido de código: pergunta explicativa pode colar um
+            # trecho da declaração real da classe como ilustração
+            if not pergunta or not _pergunta_e_explicativa(pergunta):
+                redeclaradas.append(nome)
+        elif any(b in whitelist for b in info["bases"]) and nome not in citadas:
+            usuario[nome] = info
+    return usuario, redeclaradas
+
 
 def _validar_metodos(codigo: str, methods_whitelist: set, whitelist: set, class_methods_index: dict, inheritance_index: dict = None) -> tuple[list, list]:
     if not methods_whitelist:

@@ -541,6 +541,31 @@ def remover_comentarios(code: str) -> str:
         lambda m: "" if m.group(0).startswith("/") else m.group(0), code)
 
 
+# Definição com corpo: `class|struct TPZxxx [final] [: bases] {`.
+# Forward declarations (`class TPZFoo;`) não casam — o `{` é obrigatório e
+# a lista de bases não atravessa `;`.
+_DEF_CLASSE_TPZ_RE = re.compile(
+    r'\b(?:class|struct)\s+(TPZ\w+)\s*(?:final\s*)?'
+    r'(?:\:\s*([^{;]+?))?\s*\{')
+
+
+def find_defined_tpz_classes(code: str) -> dict:
+    """Classes TPZxxx que a própria resposta DEFINE (com corpo), não só usa.
+    Retorna {nome: {"bases": [nomes normalizados], "metodos": [dicts]}} —
+    insumo de _classificar_classes_definidas para separar "classe do
+    usuário" (derivada de classe real) de fachada alucinada."""
+    fonte = remover_comentarios(code)
+    definidas = {}
+    for m in _DEF_CLASSE_TPZ_RE.finditer(fonte):
+        nome, lista = m.group(1), m.group(2)
+        abre = m.end() - 1
+        fecha = _find_matching_brace(fonte, abre)
+        corpo = fonte[abre + 1:fecha]
+        bases = [b for b in (_resolver_nome_base(b) for b in _split_bases(lista or "")) if b]
+        definidas[nome] = {"bases": bases, "metodos": _extract_method_names(corpo)}
+    return definidas
+
+
 def find_tpz_classes_in_code(code: str) -> set:
     """Extrai todos os identificadores TPZxxx usados em um trecho de código.
     Comentários e linhas de #include não contam — uma classe só citada num

@@ -33,12 +33,13 @@ def _whitelist_utilizavel(whitelist: set, class_header_index: dict) -> set:
     return utilizavel
 
 def _corrigir_classes_automaticamente(codigo: str, whitelist: set, renames: dict = None,
-                                      destinos: set = None) -> tuple:
+                                      destinos: set = None, ignorar: set = None) -> tuple:
     if not whitelist:
         return codigo, []
 
     usadas = find_tpz_classes_in_code(codigo)
-    alucinadas = [c for c in usadas if c not in whitelist]
+    alucinadas = [c for c in usadas
+                  if c not in whitelist and c not in (ignorar or ())]
     if not alucinadas:
         return codigo, []
 

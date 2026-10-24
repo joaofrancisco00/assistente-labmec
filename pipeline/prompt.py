@@ -237,6 +237,8 @@ INSTRUCTIONS:
   SetForcingFunction) over the old API (TPZDummyFunction, TPZMatPoisson3d)
 - Always include the specific #include lines needed
 - Follow the patterns of the usage examples
+- If you need your own class, derive it from the real NeoPZ class and do not
+  give it a TPZ prefix
 - If you are not sure about an exact name, write: // TODO: check name
 - If the user asks for an EXPLANATION (e.g. "what is class X"), answer with
   didactic text; code only if it is a SHORT excerpt using the explained class

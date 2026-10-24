@@ -13,7 +13,8 @@ def _resultado_sem_verificacao(resposta: str, fontes: set, llm=None) -> dict:
          "namespaces_faltando": {},
          "compilacao": {"status": "nao_executada", "erros": [], "ignorados": 0},
          "execucao": {"status": "nao_executada"}, "cmake": "",
-         "classes_legado": [], "classes_indisponiveis": {}, "correcoes_automaticas": []}
+         "classes_legado": [], "classes_indisponiveis": {}, "classes_usuario": {},
+         "correcoes_automaticas": []}
     return _resultado_de(v, False, fontes, 1, llm)
 
 

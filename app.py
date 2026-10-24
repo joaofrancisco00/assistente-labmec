@@ -104,6 +104,11 @@ def _rodape(resultado: dict) -> str:
         ) + " — the class exists in NeoPZ, but its header is not installed here, "
             "so this code does not compile on this machine")
 
+    if resultado.get("classes_usuario"):
+        linhas.append("ℹ️ **Classes defined in the answer** (not part of NeoPZ): "
+                      + ", ".join(f"{n} (derived from {', '.join(b)})"
+                                  for n, b in resultado["classes_usuario"].items()))
+
     # Código de teste/benchmark não é exemplo de uso da biblioteca: compila,
     # mas o CMake o transforma em executável separado, nunca na libpz. Ele só
     # chega aqui quando a API real não tinha nada melhor a oferecer — dizer

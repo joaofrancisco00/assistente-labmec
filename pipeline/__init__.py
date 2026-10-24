@@ -82,6 +82,7 @@ from .validation import (
     _classes_indisponiveis,
     _validar_includes_por_classe,
     _validar_metodos,
+    _classificar_classes_definidas,
     _validar_enums,
     _descrever_enum_invalido,
     _validar_namespaces,
@@ -166,6 +167,7 @@ def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INT
             "erros_compilacao":      resultado.get("compilacao", {}).get("erros", []),
             "classes_legado":        resultado.get("classes_legado", []),
             "classes_indisponiveis": resultado.get("classes_indisponiveis", {}),
+            "classes_usuario":       resultado.get("classes_usuario", {}),
             "fontes_nao_api":        resultado.get("fontes_nao_api", []),
             "fontes":                sorted(resultado["fontes"]),
         }
@@ -210,9 +212,37 @@ def _verificar_resposta(
 ) -> dict:
     tem_codigo = _resposta_contem_codigo(resposta)
     correcoes_automaticas = []
+
+    # Classificação ANTES das correções: classes TPZ* definidas no corpo da
+    # resposta — (A) redeclaração de classe real vira erro semântico,
+    # (B) derivada de base real é "classe do usuário" (não é alucinação e
+    # não pode ser auto-renomeada), (C) fachada continua alucinada.
+    classes_usuario, classes_redeclaradas = ({}, [])
+    if tem_codigo:
+        classes_usuario, classes_redeclaradas = _classificar_classes_definidas(
+            resposta, whitelist, pergunta)
+        wl_metodos = set(whitelist or set()) | set(classes_usuario)
+        metodos_wl = set(methods_whitelist or set()) | {
+            m["name"] for info in classes_usuario.values() for m in info["metodos"]}
+        cmi = dict(class_methods_index or {})
+        for nome, info in classes_usuario.items():
+            cmi[nome] = {m["name"]: {"min_args": m["min_args"],
+                                     "max_args": m["max_args"],
+                                     "sigs": list(m.get("sigs", []))}
+                         for m in info["metodos"]}
+        heranca_metodos = dict(inheritance_index or {})
+        for nome, info in classes_usuario.items():
+            heranca_metodos[nome] = info["bases"]
+    else:
+        wl_metodos = whitelist
+        metodos_wl = methods_whitelist
+        cmi = class_methods_index
+        heranca_metodos = inheritance_index
+
     if tem_codigo:
         resposta, correcoes_classes = _corrigir_classes_automaticamente(
-            resposta, whitelist, renames, destinos=destinos)
+            resposta, whitelist, renames, destinos=destinos,
+            ignorar=set(classes_usuario))
         correcoes_automaticas.extend(correcoes_classes)
 
         resposta, correcoes_namespaces = _corrigir_namespaces_automaticamente(
@@ -222,7 +252,7 @@ def _verificar_resposta(
         resposta, correcoes_enums = _corrigir_enums_automaticamente(resposta, enum_values_index)
         correcoes_automaticas.extend(correcoes_enums)
 
-        metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index, inheritance_index)
+        metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, metodos_wl, wl_metodos, cmi, heranca_metodos)
         resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
             resposta, metodos_suspeitos_pre_correcao, class_methods_index,
         )
@@ -237,12 +267,16 @@ def _verificar_resposta(
             print(f"  🔧 Corrigido automaticamente: {', '.join(correcoes_automaticas)}")
             _emitir(on_evento, "status", f"🔧 Automatically fixed: {', '.join(correcoes_automaticas)}")
 
-    classes_alucinadas = _validar_codigo(resposta, whitelist)
+    classes_alucinadas = _validar_codigo(resposta, set(whitelist or set()) | set(classes_usuario))
     if tem_codigo:
         includes_errados = _validar_includes(resposta, headers_whitelist)
         includes_por_classe = _validar_includes_por_classe(resposta, class_header_index, collisions)
-        metodos_suspeitos, erros_aridade = _validar_metodos(resposta, methods_whitelist, whitelist, class_methods_index, inheritance_index)
+        metodos_suspeitos, erros_aridade = _validar_metodos(resposta, metodos_wl, wl_metodos, cmi, heranca_metodos)
         erros_semanticos = validar_semantica(resposta, pergunta)
+        erros_semanticos += [
+            f"{nome} is a real NeoPZ class: do not redeclare it in your code; "
+            f"#include its header and use it as is."
+            for nome in classes_redeclaradas]
         enums_invalidos = _validar_enums(resposta, enum_values_index)
         namespaces_faltando = _validar_namespaces(resposta, class_namespace_index)
     else:
@@ -333,6 +367,7 @@ def _verificar_resposta(
         "cmake":                 _instrucoes_cmake(resposta) if tem_codigo else "",
         "classes_legado":        classes_legado_usadas,
         "classes_indisponiveis": classes_indisponiveis,
+        "classes_usuario":       {n: i["bases"] for n, i in classes_usuario.items()},
         "correcoes_automaticas": correcoes_automaticas,
     }
 
@@ -369,7 +404,7 @@ def _resultado_de(v: dict, valido: bool, fontes, tentativas: int,
         **{k: v[k] for k in ("resposta", "alucinacoes", "erros_aridade", "erros_semanticos",
                              "includes", "includes_por_classe", "metodos_suspeitos",
                              "enums_invalidos", "namespaces_faltando", "compilacao", "execucao", "cmake", "classes_legado", "classes_indisponiveis",
-                             "correcoes_automaticas")},
+                             "classes_usuario", "correcoes_automaticas")},
         "valido":         valido,
         "modelo":         getattr(llm, "model", type(llm).__name__) if llm is not None else "desconhecido",
         "diagnosticos":   diagnosticos if diagnosticos is not None else [],
@@ -698,6 +733,10 @@ def main():
             print(f"⚠️  Class exists in NeoPZ but is not available here: {indisp_fmt}")
             print("   The code will not compile without that header — compilation was skipped,")
             print("   this is not a model hallucination (see _classes_indisponiveis)")
+        if resultado.get("classes_usuario"):
+            fmt = ", ".join(f"{n} (derived from {', '.join(b)})"
+                            for n, b in resultado["classes_usuario"].items())
+            print(f"ℹ️  Classes defined in the answer (not part of NeoPZ): {fmt}")
         if resultado.get("fontes_nao_api"):
             nomes = ", ".join(Path(f).name for f in resultado["fontes_nao_api"])
             print(f"ℹ️  Test/benchmark sources consulted: {nomes}")

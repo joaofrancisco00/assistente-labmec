@@ -1046,6 +1046,103 @@ class TestClassesPorIntencao(unittest.TestCase):
             "plane elastostatics"))
 
 
+class TestClassesDefinidasNaResposta(unittest.TestCase):
+    """Classes TPZ* que a própria resposta define com corpo:
+    (A) redeclaração de classe real → erro semântico;
+    (B) derivada de base real, não citada na pergunta → classe do usuário;
+    (C) fachada sem base real (ou citada na pergunta) → alucinação."""
+    WL = {"TPZBndCondT", "TPZMatPoisson", "TPZGeoMesh"}
+
+    def _verificar(self, resposta, pergunta="use a boundary condition", **kw):
+        with patch.object(pipeline, "_compilar_codigo",
+                          return_value={"status": "inconclusivo",
+                                        "erros": [], "ignorados": 1}), \
+             redirect_stdout(io.StringIO()):
+            return pipeline._verificar_resposta(
+                resposta,
+                whitelist=self.WL,
+                headers_whitelist=set(),
+                methods_whitelist=kw.get("methods_whitelist", set()),
+                class_header_index={},
+                class_methods_index=kw.get("class_methods_index", {}),
+                collisions={}, renames={}, legacy_classes=set(),
+                destinos=self.WL,
+                inheritance_index=kw.get("inheritance_index", {}),
+                pergunta=pergunta,
+            )
+
+    def test_derivada_de_base_real_e_classe_do_usuario(self):
+        resposta = ("```cpp\n"
+                    "class TPZMinhaBC : public TPZBndCondT<STATE> {\n"
+                    "public:\n    void Foo(int a) {}\n"
+                    "};\n"
+                    "TPZMinhaBC bc(1);\nbc.Foo(1);\n```\n")
+        v = self._verificar(resposta, methods_whitelist={"Print"})
+        self.assertNotIn("TPZMinhaBC", v["alucinacoes"])
+        self.assertEqual(v["metodos_suspeitos"], [])
+        self.assertEqual(v["classes_usuario"], {"TPZMinhaBC": ["TPZBndCondT"]})
+
+    def test_metodo_fora_do_corpo_da_classe_do_usuario_flaga(self):
+        # Foo está no corpo e passa; Inventado não está no corpo, nem nas
+        # bases, nem na whitelist global — continua suspeito
+        resposta = ("```cpp\n"
+                    "class TPZMinhaBC : public TPZBndCondT<STATE> {\n"
+                    "public:\n    void Foo(int a) {}\n"
+                    "};\n"
+                    "TPZMinhaBC bc(1);\nbc.Inventado();\n```\n")
+        v = self._verificar(resposta, methods_whitelist={"Print"})
+        self.assertIn(("TPZMinhaBC", "Inventado"), v["metodos_suspeitos"])
+
+    def test_classe_do_usuario_nao_e_reescrita_pela_correcao(self):
+        # TPZMatPoisson2 é próximo de TPZMatPoisson por string — sem a lista
+        # de ignorar, a correção automática reescreveria o nome da classe
+        resposta = ("```cpp\n"
+                    "class TPZMatPoisson2 : public TPZMatPoisson<STATE> {\n"
+                    "public:\n    void Foo(int a) {}\n"
+                    "};\n```\n")
+        v = self._verificar(resposta)
+        self.assertIn("TPZMatPoisson2", v["resposta"])
+        self.assertEqual(v["correcoes_automaticas"], [])
+        self.assertEqual(v["classes_usuario"], {"TPZMatPoisson2": ["TPZMatPoisson"]})
+
+    def test_fachada_sem_base_real_continua_alucinacao(self):
+        resposta = ("```cpp\n"
+                    "class TPZNavierStokes {\n"
+                    "public:\n    void SetViscosity(double v) {}\n"
+                    "};\n```\n")
+        v = self._verificar(resposta)
+        self.assertIn("TPZNavierStokes", v["alucinacoes"])
+
+    def test_derivada_citada_na_pergunta_continua_alucinacao(self):
+        # Citada na pergunta como se fosse NeoPZ, ela não é "classe do
+        # usuário" — segue a regra de hoje
+        resposta = ("```cpp\n"
+                    "class TPZDirichletXY : public TPZBndCondT<STATE> {\n"
+                    "public:\n    void Foo(int a) {}\n"
+                    "};\n```\n")
+        v = self._verificar(resposta,
+                            pergunta="how does TPZDirichletXY work in NeoPZ?")
+        self.assertIn("TPZDirichletXY", v["alucinacoes"])
+
+    def test_redeclaracao_de_classe_real_vira_erro_semantico(self):
+        v = self._verificar("```cpp\nclass TPZGeoMesh { };\n```\n")
+        self.assertTrue(any("TPZGeoMesh is a real NeoPZ class" in e
+                            for e in v["erros_semanticos"]), v["erros_semanticos"])
+        self.assertNotIn("TPZGeoMesh", v["alucinacoes"])
+        self.assertFalse(v["nomes_ok"])
+
+    def test_redeclaracao_em_pergunta_explicativa_e_ignorada(self):
+        # "What is TPZGeoMesh?" pode colar a declaração real da classe como
+        # ilustração — não é pedido de código, não é redeclaração
+        codigo = ("```cpp\nclass TPZGeoMesh : public TPZSavable {\n"
+                  "public:\n    int Dimension() const;\n};\n```\n")
+        v = self._verificar(codigo, pergunta="What is the TPZGeoMesh class?")
+        self.assertEqual(v["erros_semanticos"], [])
+        v = self._verificar(codigo,
+                            pergunta="Write code that creates a TPZGeoMesh")
+        self.assertTrue(any("TPZGeoMesh is a real NeoPZ class" in e
+                            for e in v["erros_semanticos"]), v["erros_semanticos"])
+
 
 class TestSleepSoParaAPI(unittest.TestCase):
     def test_ollama_nao_dorme_entre_retries(self):

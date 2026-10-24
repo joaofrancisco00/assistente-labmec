@@ -19,6 +19,7 @@ from pipeline.cpp_parser import (
     build_inheritance_index,
     build_tiered_class_whitelist,
     extract_classes_from_header,
+    find_defined_tpz_classes,
     find_suspicious_method_calls,
     find_tpz_classes_in_code,
 )
@@ -116,6 +117,27 @@ class TestWhitelistDoisNiveis(unittest.TestCase):
         # Só quem vive EXCLUSIVAMENTE no legado entra no segundo nível;
         # quem aparece nos dois lados fica de fora (menos aviso = lado seguro)
         self.assertEqual(apenas_legado, {"TPZMatVelha"})
+
+
+class TestClassesDefinidasNaResposta(unittest.TestCase):
+    def test_classe_com_base_e_metodos(self):
+        defs = find_defined_tpz_classes(
+            "class TPZDirichletXY : public TPZBndCondT<STATE> {\n"
+            "public:\n    void Foo(int a) {}\n    int Bar() { return 0; }\n"
+            "};")
+        self.assertEqual(defs["TPZDirichletXY"]["bases"], ["TPZBndCondT"])
+        nomes = [m["name"] for m in defs["TPZDirichletXY"]["metodos"]]
+        self.assertIn("Foo", nomes)
+        self.assertIn("Bar", nomes)
+
+    def test_forward_declaration_nao_conta(self):
+        self.assertEqual(
+            find_defined_tpz_classes("class TPZFoo;\nTPZFoo *f = nullptr;"), {})
+
+    def test_classe_so_em_comentario_nao_conta(self):
+        defs = find_defined_tpz_classes(
+            "// class TPZFake { public: void X(); };\n/* class TPZBar {} */\n")
+        self.assertEqual(defs, {})
 
 
 class TestChamadasSuspeitas(unittest.TestCase):

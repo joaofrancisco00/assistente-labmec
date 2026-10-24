@@ -139,7 +139,7 @@ class TestRespostaFinalDoAgente(unittest.TestCase):
                      "includes", "includes_por_classe", "metodos_suspeitos", "enums_invalidos",
                      "namespaces_faltando",
                      "compilacao", "execucao", "cmake",
-                     "classes_legado", "classes_indisponiveis", "fontes_nao_api",
+                     "classes_legado", "classes_indisponiveis", "classes_usuario", "fontes_nao_api",
                      "correcoes_automaticas", "fontes", "tentativas",
                      "modelo", "diagnosticos"}
         self.assertEqual(set(r), esperadas)
