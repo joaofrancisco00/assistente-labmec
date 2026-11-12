@@ -384,5 +384,44 @@ class TestClassesEmComentarios(unittest.TestCase):
                          {"TPZDoc", "TPZBar"})
 
 
+class TestChunkingExemplosCpp(unittest.TestCase):
+    def test_clean_cpp_example_remove_licenca_e_logger(self):
+        from pipeline.cpp_parser import clean_cpp_example
+        raw = (
+            "/* This file is part of the PZ environment */\n"
+            '#include "pzgmesh.h"\n'
+            'static TPZLogger logger("pz.mesh");\n'
+            "void Foo() { TPZGeoMesh g; }\n"
+        )
+        cleaned = clean_cpp_example(raw)
+        self.assertNotIn("PZ environment", cleaned)
+        self.assertNotIn("TPZLogger", cleaned)
+        self.assertIn("TPZGeoMesh", cleaned)
+
+    def test_reattach_orphan_signatures_une_assinatura_ao_corpo(self):
+        from pipeline.cpp_parser import reattach_orphan_signatures
+        c1 = "void A() {\n    int x = 1;\n}\n\nvoid TPZFoo::Bar(int a, int b)"
+        c2 = "{\n    TPZGeoMesh g;\n}"
+        res = reattach_orphan_signatures([c1, c2])
+        self.assertEqual(len(res), 2)
+        self.assertNotIn("TPZFoo::Bar", res[0])
+        self.assertTrue(res[1].startswith("void TPZFoo::Bar(int a, int b)\n{"))
+
+    def test_filter_cpp_example_chunk_descarta_ctors_vazios_e_includes_puros(self):
+        from pipeline.cpp_parser import filter_cpp_example_chunk
+        so_includes = '#include "TPZGeoMesh.h"\n#include "pzcmesh.h"\n'
+        ok1, _ = filter_cpp_example_chunk(so_includes)
+        self.assertFalse(ok1)
+
+        so_ctors = "TPZFoo::TPZFoo() {}\nTPZFoo::~TPZFoo() {}\n"
+        ok2, _ = filter_cpp_example_chunk(so_ctors)
+        self.assertFalse(ok2)
+
+        util = "void Run() {\n    TPZGeoMesh *g = new TPZGeoMesh();\n    g->SetDimension(2);\n}\n"
+        ok3, classes = filter_cpp_example_chunk(util)
+        self.assertTrue(ok3)
+        self.assertEqual(classes, "TPZGeoMesh")
+
+
 if __name__ == "__main__":
     unittest.main()

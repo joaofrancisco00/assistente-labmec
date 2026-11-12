@@ -1153,5 +1153,100 @@ class TestSleepSoParaAPI(unittest.TestCase):
         dormir.assert_not_called()
 
 
+class TestPrefixCacheETelemetria(unittest.TestCase):
+    def test_prefixo_estatico_identico_entre_tentativas(self):
+        from langchain_core.documents import Document
+        contexto = "=== HEADERS ===\nclass TPZGeoMesh {};\n"
+        extra = Document(page_content="class TPZDarcyFlow {};",
+                         metadata={"source": "TPZDarcyFlow.h", "classe": "TPZDarcyFlow"})
+        p1 = pipeline.prompt._montar_prompt(
+            "solve Darcy", contexto, "SYS", {"TPZGeoMesh"}, {"pzgmesh.h"},
+            classes_contexto={"TPZGeoMesh"})
+        p2 = pipeline.prompt._montar_prompt(
+            "solve Darcy", contexto, "SYS", {"TPZGeoMesh"}, {"pzgmesh.h"},
+            classes_contexto={"TPZGeoMesh"},
+            classes_alucinadas=["TPZFake"],
+            erros_aridade=["TPZManVector::TPZManVector expects 1 arg, got 3."],
+            resposta_anterior="```cpp\nTPZFake x;\n```",
+            extras_docs=[extra],
+        )
+        marcador = "\n\nTask: solve Darcy"
+        idx = p1.index(marcador)
+        self.assertEqual(p1[:idx], p2[:idx])
+        self.assertIn("initializer list", p2)
+        self.assertIn("ADDITIONAL DECLARATIONS (for retry)", p2)
+
+    def test_diagnostico_registra_tempos_por_etapa(self):
+        llm = _LLMFalso("Resposta apenas textual.")
+        r = _gerar("what is TPZGeoMesh?", llm)
+        self.assertEqual(len(r["diagnosticos"]), 1)
+        tempos = r["diagnosticos"][0].get("tempos", {})
+        for chave in ("recuperacao_s", "llm_s", "validacao_s", "compilacao_s", "execucao_s"):
+            self.assertIn(chave, tempos)
+
+
+class TestCorrecaoCaseIncludeEPadroesAPI(unittest.TestCase):
+    def test_include_case_insensitive_corrigido(self):
+        resp = '```cpp\n#include "tpzcompelhdivduplconnects.h"\n```\n'
+        novo, corr = pipeline.correction._corrigir_includes_automaticamente(
+            resp, {}, {}, headers_whitelist={"TPZCompElHDivDuplConnects.h"})
+        self.assertIn('#include "TPZCompElHDivDuplConnects.h"', novo)
+        self.assertTrue(any("TPZCompElHDivDuplConnects.h" in c for c in corr))
+
+    def test_corrigir_padroes_conhecidos(self):
+        resp = (
+            "```cpp\n"
+            "TPZAutoPointer<TPZGeoMesh> gmesh = TPZGeoMesh();\n"
+            "gmesh->CreateGeoElement(pztopology::TPZTriangle::ClassId(), nodes, 1, -1);\n"
+            "TPZVTKGenerator vtk(cmesh, {\"Solution\"}, \"out\", 0);\n"
+            "vtk.SetSolution(sol);\n"
+            "```\n"
+        )
+        novo, corr = pipeline.correction._corrigir_padroes_conhecidos(resp)
+        self.assertIn("new TPZGeoMesh()", novo)
+        self.assertIn("ETriangle", novo)
+        self.assertNotIn("TPZTriangle::ClassId()", novo)
+        self.assertIn("int64_t elIndex = -1;", novo)
+        self.assertNotIn("SetSolution", novo)
+        self.assertGreaterEqual(len(corr), 3)
+
+
+class TestIntencoesNovasEPodaExemplos(unittest.TestCase):
+    def test_novos_gatilhos_de_intencao(self):
+        self.assertIn(
+            "TPZCompElHDiv",
+            pipeline.retrieval._classes_por_intencao("Compare H1 and H(div) spaces"),
+        )
+        self.assertIn(
+            "TPZDarcyFlow",
+            pipeline.retrieval._classes_por_intencao("Write a 2D H1 Darcy program"),
+        )
+        self.assertIn(
+            "TPZGeoMesh",
+            pipeline.retrieval._classes_por_intencao("Write a snippet that adds four nodes"),
+        )
+
+    def test_poda_exemplos_quando_receita_forte_presente(self):
+        from langchain_core.documents import Document
+        receita = Document(
+            page_content="# Flow recipe",
+            metadata={"tipo": "doc_fluxo", "classes_usadas": "TPZDarcyFlow", "source": "wiki/flows/darcy.md"},
+        )
+        exemplos = [
+            Document(page_content=f"ex {i}", metadata={"tipo": "exemplo", "source": f"ex{i}.cpp"})
+            for i in range(3)
+        ]
+        headers_db = MockDB()
+        examples_db = MockDB(docs_mmr=exemplos)
+        wiki_db = MockDB(docs_mmr=[receita])
+        with patch("pipeline.retrieval._get_reranker",
+                   return_value=_RerankerFalso([5.0] * 10)), \
+             redirect_stdout(io.StringIO()):
+            _, e_docs, w_docs, _ = pipeline._recuperar_contexto(
+                "Write a 2D H1 Darcy program", headers_db, examples_db, wiki_db, explicativa=False)
+        self.assertTrue(any(d.metadata.get("tipo") == "doc_fluxo" for d in w_docs))
+        self.assertEqual(len(e_docs), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

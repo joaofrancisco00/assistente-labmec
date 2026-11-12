@@ -24,3 +24,7 @@ Public methods (exact declarations from the header):
 - `void PrintSolutionByGeoElement(TPZCompMesh *cmesh, std::ostream &out)`
 - `void PrintStiffnessMatrixByGeoElement(TPZCompMesh *cmesh, std::ostream &out, std::set<int> matIDs =`
 - `void PrintConnectInfoByGeoElement(TPZCompMesh *cmesh, std::ostream &out, std::set<int> matIDs =`
+
+Does NOT exist (common mistakes):
+- Canonical static condensation sequence on `TPZCompMesh *cmesh`: `TPZCompMeshTools::GroupElements(cmesh); TPZCompMeshTools::CreatedCondensedElements(cmesh, true);` (or `TPZCompMeshTools::CondenseElements(cmesh, 0, true);`), then solve with `TPZLinearAnalysis an(cmesh); an.Assemble(); an.Solve();`, then `TPZCompMeshTools::UnCondensedElements(cmesh);`.
+- `TPZLinearAnalysis::SetMaterial` and `TPZNonLinMultGridAnalysis` do NOT exist — materials belong in `cmesh->InsertMaterialObject(mat)`.

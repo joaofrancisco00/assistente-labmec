@@ -82,6 +82,7 @@ def _montar_prompt(
     historico: list = None,
     destinos: set = None,
     resposta_anterior: str = None,
+    extras_docs: list = None,
 ) -> str:
     destinos = whitelist if destinos is None else destinos
 
@@ -162,9 +163,17 @@ def _montar_prompt(
         )
 
     if erros_aridade:
+        dica_vec = ""
+        if any("TPZManVector::TPZManVector" in e or "TPZVec::TPZVec" in e for e in erros_aridade):
+            dica_vec = (
+                "\n  - To initialize a TPZManVector or TPZVec with element values, "
+                "use a brace-enclosed initializer list: `TPZManVector<REAL, 3> v = {x, y, z};` "
+                "(NEVER parentheses `v(x, y, z)`)."
+            )
         instrucao_correcao += (
             "\n\n⚠️ ARITY ERROR (WRONG NUMBER OF ARGUMENTS):\n"
             + "\n".join(f"  - {e}" for e in erros_aridade)
+            + dica_vec
             + "\nCheck the correct method signature in the provided class declarations."
         )
 
@@ -214,6 +223,16 @@ def _montar_prompt(
     elif instrucao_correcao:
         instrucao_correcao += "\nRewrite the code using the correct names."
 
+    bloco_extra = ""
+    if extras_docs:
+        partes_extra = ["\n\n=== ADDITIONAL DECLARATIONS (for retry) ==="]
+        for doc in extras_docs:
+            classe = doc.metadata.get("classe", "")
+            label = f"[Class: {classe}]" if classe else "[Header]"
+            partes_extra.append(f"{label}\n{doc.page_content}")
+        partes_extra.append("=== END OF ADDITIONAL DECLARATIONS ===")
+        bloco_extra = "\n\n---\n\n".join(partes_extra)
+
     return f"""{system_base}
 
 FUNDAMENTAL RULE: NEVER invent TPZ class names or header names.
@@ -228,7 +247,6 @@ For EACH class, include its specific header. Examples:
 
 Real TPZ classes related to this task (all of them exist in NeoPZ):
 {classes_reais}
-{instrucao_correcao}
 
 INSTRUCTIONS:
 - Use only classes whose headers appear in the context
@@ -250,7 +268,7 @@ INSTRUCTIONS:
   that an example was verified, that applies to THAT example, not to yours
 - Always answer in English
 
-{contexto}{_formatar_historico(historico)}
+{contexto}{_formatar_historico(historico)}{bloco_extra}{instrucao_correcao}
 
 Task: {pergunta}
 

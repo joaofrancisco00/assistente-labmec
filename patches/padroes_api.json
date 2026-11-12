@@ -1,0 +1,27 @@
+{
+  "topology_class_to_element_type": {
+    "TPZTriangle": "ETriangle",
+    "TPZGeoTriangle": "ETriangle",
+    "TPZQuad": "EQuadrilateral",
+    "TPZGeoQuad": "EQuadrilateral",
+    "TPZLinear": "EOned",
+    "TPZGeoLinear": "EOned",
+    "TPZTetrahedra": "ETetraedro",
+    "TPZGeoTetrahedra": "ETetraedro",
+    "TPZCube": "ECube",
+    "TPZGeoCube": "ECube",
+    "TPZPrism": "EPrisma",
+    "TPZGeoPrism": "EPrisma",
+    "TPZPyramid": "EPiramide",
+    "TPZGeoPyramid": "EPiramide",
+    "TPZPoint": "EPoint",
+    "TPZGeoPoint": "EPoint"
+  },
+  "removed_noop_calls": [
+    {
+      "class": "TPZVTKGenerator",
+      "method": "SetSolution",
+      "reason": "TPZVTKGenerator::SetSolution removed (solution lives in TPZCompMesh)"
+    }
+  ]
+}

@@ -30,6 +30,43 @@ The discretization object: computational elements (`TPZCompEl`), connects (DOF b
 - The mesh owns an `ApproxSpace()` (`TPZCreateApproximationSpace`) that stamps which element type gets created per geometry → [[approx-space-creators]].
 - `NEquations()` reflects condensed system size vs `Solution().Rows()` full size (used by divfreebubbles `iter_elast.cpp:257-272` [repo]).
 
+## Creating an H(div) or H1 computational mesh
+To build an $H(\text{div})$ approximation space of order `pOrder` on a 2D quadrilateral `TPZGeoMesh`, call `SetDefaultOrder(pOrder)` and `SetAllCreateFunctionsHDiv()` (never `SetAllCreateFunctionsContinuous()`, which builds $H^1$), insert a `TPZNullMaterial<>(matId, dim)` (or physical material), and call `AutoBuild()`:
+
+```cpp
+#include "pzgmesh.h"
+#include "TPZGeoMeshTools.h"
+#include "MMeshType.h"
+#include "pzcmesh.h"
+#include "TPZNullMaterial.h"
+#include "pzmanvector.h"
+
+int main() {
+    constexpr int dim = 2;
+    constexpr int matId = 1;
+
+    const TPZManVector<REAL, 3> minX = {0., 0., 0.};
+    const TPZManVector<REAL, 3> maxX = {1., 1., 0.};
+    const TPZManVector<int, 2> nDivs = {4, 4};
+    const TPZManVector<int, 1> matIds = {matId};
+    TPZGeoMesh *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(
+        dim, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral, false);
+
+    auto *cmesh = new TPZCompMesh(gmesh);
+    cmesh->SetDimModel(dim);
+    cmesh->SetDefaultOrder(2);
+    cmesh->SetAllCreateFunctionsHDiv();
+
+    auto *mat = new TPZNullMaterial<>(matId, dim);
+    cmesh->InsertMaterialObject(mat);
+    cmesh->AutoBuild();
+
+    delete cmesh;
+    delete gmesh;
+    return 0;
+}
+```
+
 ## Related
 [[TPZGeoMesh]] · [[approx-space-creators]] · [[material-system]] · [[assembly]] · [[static-condensation]] · [[structural-matrices]] · [[persistence]]
 

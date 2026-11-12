@@ -133,6 +133,25 @@ def extrair_publicos(linhas: list, nome: str) -> list:
     return decls
 
 
+_NOTAS_CARDS = {
+    "TPZVTKGenerator": [
+        "`SetSolution`, `Generate`, `Write`, `Export` do NOT exist — the solution is already stored in `TPZCompMesh` after `an.Solve()`; pass `an.Mesh()` (or `cmesh`) to the constructor and call `vtk.Do()`.",
+    ],
+    "TPZGeoMesh": [
+        "`NodeVec().PushBack`, `NodeVec().Append`, `ElementVec().PushBack`, `AddNode`, `AddElement` do NOT exist, and `CreateUniqueNodeId()` does NOT allocate a node in `NodeVec()`.",
+        "To add a node: `int64_t idx = gmesh->NodeVec().AllocateNewElement(); gmesh->NodeVec()[idx].Initialize(coord, *gmesh);`.",
+        "To create an element: `int64_t elIdx = -1; gmesh->CreateGeoElement(ETriangle, nodeIndices, matId, elIdx);` (4 args; 1st arg is `MElementType` such as `ETriangle` or `EQuadrilateral` from `pzeltype.h`, NEVER `TPZTriangle::ClassId()`; 4th arg is an `int64_t` variable by reference, NEVER `-1`).",
+    ],
+    "TPZManVector": [
+        "No constructor takes 3+ element values in parentheses `TPZManVector<REAL, 3> v(x, y, z)` — use brace initializer list `TPZManVector<REAL, 3> v = {x, y, z};` or `TPZManVector<REAL, 3> v(3, 0.0);`.",
+    ],
+    "TPZCompMeshTools": [
+        "Canonical static condensation sequence on `TPZCompMesh *cmesh`: `TPZCompMeshTools::GroupElements(cmesh); TPZCompMeshTools::CreatedCondensedElements(cmesh, true);` (or `TPZCompMeshTools::CondenseElements(cmesh, 0, true);`), then solve with `TPZLinearAnalysis an(cmesh); an.Assemble(); an.Solve();`, then `TPZCompMeshTools::UnCondensedElements(cmesh);`.",
+        "`TPZLinearAnalysis::SetMaterial` and `TPZNonLinMultGridAnalysis` do NOT exist — materials belong in `cmesh->InsertMaterialObject(mat)`.",
+    ],
+}
+
+
 def gerar_card(nome: str, header_rel: str) -> str:
     header_path = NEOPZ_DIR / header_rel
     texto = header_path.read_text(encoding="utf-8", errors="replace")
@@ -149,6 +168,9 @@ def gerar_card(nome: str, header_rel: str) -> str:
            "",
            "Public methods (exact declarations from the header):"]
     out += [f"- `{d}`" for d in decls] or ["- (nenhuma declaração pública encontrada)"]
+    if nome in _NOTAS_CARDS:
+        out += ["", "Does NOT exist (common mistakes):"]
+        out += [f"- {nota}" for nota in _NOTAS_CARDS[nome]]
     return "\n".join(out) + "\n"
 
 

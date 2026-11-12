@@ -162,9 +162,9 @@ def _parse_arity(args_str: str) -> tuple[int, int]:
     
     while i < n:
         c = args_str[i]
-        if c in '<([':
+        if c in '<([{':
             depth += 1
-        elif c in '>)]':
+        elif c in '>)]}':
             depth -= 1
         elif c == ',' and depth == 0:
             total_args += 1
@@ -576,6 +576,97 @@ def find_tpz_classes_in_code(code: str) -> set:
     return set(re.findall(r'\bTPZ[A-Z]\w+', sem_includes))
 
 
+_LICENCA_TOPO_RE = re.compile(
+    r'^\s*(?:/\*.*?\*/\s*|(?://[^\n]*\n)+)+',
+    re.DOTALL,
+)
+_CTOR_VAZIO_RE = re.compile(
+    r'(?:template\s*<[^>]*>\s*)?'
+    r'\b[\w:<>~]+\s*::\s*~?\w+\s*\([^;{}]*\)\s*(?::\s*[^{;]+)?\{\s*\}'
+)
+
+
+def clean_cpp_example(content: str) -> str:
+    """Remove cabeçalhos de licença no topo do .cpp e declarações estáticas de
+    TPZLogger que poluem chunks de exemplo."""
+    m = _LICENCA_TOPO_RE.match(content)
+    if m and any(k in m.group(0) for k in (
+        "PZ environment", "Universidade Estadual de Campinas",
+        "GNU General Public License", "Copyright",
+    )):
+        content = content[m.end():]
+    content = re.sub(
+        r'^\s*static\s+TPZLogger\s+\w+\s*\([^;]*\)\s*;\s*$',
+        '',
+        content,
+        flags=re.M,
+    )
+    return content.lstrip()
+
+
+def reattach_orphan_signatures(chunks: list[str]) -> list[str]:
+    """Reanexa assinaturas de função/método que ficaram órfãs no fim de um chunk
+    enquanto o corpo `{ ... }` ficou no início do chunk seguinte."""
+    if not chunks:
+        return []
+    out = list(chunks)
+    for i in range(len(out)):
+        chunk = out[i].rstrip()
+        # Procura o último ';' ou '}' fora de uma assinatura pendente no final do chunk
+        ult_delim = max(chunk.rfind(';'), chunk.rfind('}'))
+        if ult_delim == -1 or ult_delim >= len(chunk) - 1:
+            continue
+        tail = chunk[ult_delim + 1:].strip()
+        # Assinatura órfã no fim do chunk: tem '(' e ')' mas nenhuma '{'
+        if not tail or '(' not in tail or ')' not in tail or '{' in tail:
+            continue
+        if tail.startswith('#'):
+            continue
+        # Remove a assinatura órfã sem corpo do final do chunk i (se sobrar conteúdo útil antes)
+        prefixo = chunk[:ult_delim + 1].rstrip()
+        if prefixo:
+            out[i] = prefixo
+        # Se o próximo chunk começa com '{' ou lista de inicialização ': Base(...)',
+        # garante que a assinatura esteja presente no início do próximo chunk
+        if i + 1 < len(out):
+            prox = out[i + 1].lstrip()
+            if (prox.startswith('{') or prox.startswith(':')) and not prox.startswith(tail):
+                out[i + 1] = f"{tail}\n{prox}"
+    return [c for c in out if c.strip()]
+
+
+def filter_cpp_example_chunk(chunk: str) -> tuple[bool, str]:
+    """Avalia se um chunk de .cpp deve ser indexado em neopz_examples.
+    Retorna (aprovado, classes_usadas_csv)."""
+    if ("This file is part of the PZ environment" in chunk
+            or "Universidade Estadual de Campinas" in chunk):
+        if len(chunk.strip()) < 1000:
+            return False, ""
+
+    classes = find_tpz_classes_in_code(chunk) - {"TPZLogger"}
+    tpz_classes = ", ".join(sorted(classes))
+
+    sem_coment = remover_comentarios(chunk)
+    linhas_uteis = [
+        ln for ln in sem_coment.splitlines()
+        if ln.strip()
+        and not ln.strip().startswith('#include')
+        and not ln.strip().startswith('#pragma')
+    ]
+    texto_util = '\n'.join(linhas_uteis).strip()
+
+    # Descarta chunks que só contêm construtores/destrutores vazios ou chaves soltas
+    sem_ctors_vazios = _CTOR_VAZIO_RE.sub('', texto_util)
+    if len(re.sub(r'[\s{};]+', '', sem_ctors_vazios)) < 30:
+        return False, ""
+
+    if not classes and len(texto_util) < 150:
+        return False, ""
+
+    return True, tpz_classes
+
+
+
 # ── Validação de MÉTODOS (não só classe/header) ─────────────────────────────────
 #
 # Até aqui, só o NOME da classe e do header eram validados — um método
@@ -828,9 +919,9 @@ def _count_call_args(code: str, open_pos: int) -> int:
     
     while i < n:
         c = args_str[i]
-        if c in '<([':
+        if c in '<([{':
             depth += 1
-        elif c in '>)]':
+        elif c in '>)]}':
             depth -= 1
         elif c == ',' and depth == 0:
             commas += 1

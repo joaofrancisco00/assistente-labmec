@@ -15,3 +15,6 @@ Public methods (exact declarations from the header):
 - `int NThreads() const`
 - `void SetStep(int st)`
 - `int Step() const`
+
+Does NOT exist (common mistakes):
+- `SetSolution`, `Generate`, `Write`, `Export` do NOT exist — the solution is already stored in `TPZCompMesh` after `an.Solve()`; pass `an.Mesh()` (or `cmesh`) to the constructor and call `vtk.Do()`.

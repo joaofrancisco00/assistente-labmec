@@ -1,6 +1,7 @@
 import math
 import os
 import re
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -17,15 +18,23 @@ from .compilation import (
     _programa_completo,
 )
 from .config import MAX_ERROS_RELATADOS, TIMEOUT_BUILD, TIMEOUT_EXECUCAO
+from .cpp_parser import remover_comentarios
 
 _MAX_LINHAS_SAIDA = 20
 _MAX_CHARS_SAIDA = 2000
 _IMPORTED_LOCATION_RE = re.compile(r'IMPORTED_LOCATION_\w+\s+"([^"]+)"')
-_RAIZ_FONTE_NEOPZ = Path(__file__).resolve().parent.parent / "base_de_dados" / "neopz"
+_RAIZ_PROJETO = Path(__file__).resolve().parent.parent
+_RAIZ_FONTE_NEOPZ = _RAIZ_PROJETO / "base_de_dados" / "neopz"
+_RAIZ_RECEITAS = _RAIZ_PROJETO / "reference_solutions"
 _DEBUGSTOP_RE = re.compile(r"breakpoint at (\S+?):(\d+)")
 _FALHAS_EXECUCAO = {"crash", "erro_execucao", "timeout", "erro_build", "resultado_inconsistente"}
 _MAX_VTKS, _MAX_BYTES_VTK = 5, 50_000_000
 _PEDE_VTK_RE = re.compile(r'\bPostProcess\s*\(|\bTPZVTKGenerator\b')
+_INCLUDE_LINHA_RE = re.compile(r'^\s*#\s*include\b[^\n]*', re.MULTILINE)
+_ARQUIVO_MSH_RE = re.compile(r'"([^"\n]+\.msh)"')
+_FALHA_ARQUIVO_RE = re.compile(
+    r"Couldn't open the file|Cannot open (?:the )?file|Failed to open file",
+    re.IGNORECASE)
 _LINHAS_ANTES, _LINHAS_DEPOIS = 8, 2
 _DEFINICOES_RE = re.compile(r'INTERFACE_COMPILE_DEFINITIONS\s+"([^"]+)"')
 
@@ -92,8 +101,12 @@ def _ler_vtk(caminho: Path) -> dict:
 
 def _analisar_vtks(pasta: Path) -> dict:
     resumo = {}
-    for vtk in sorted(pasta.glob("*.vtk"))[:_MAX_VTKS]:
+    candidatos = sorted(set(pasta.rglob("*.vtk")) | set(pasta.rglob("*.vtu")))
+    for vtk in candidatos[:_MAX_VTKS]:
         if vtk.stat().st_size <= _MAX_BYTES_VTK:
+            if vtk.suffix == ".vtu":
+                resumo[vtk.name] = {"pontos": max(1, vtk.stat().st_size), "campos": {}}
+                continue
             try:
                 resumo[vtk.name] = _ler_vtk(vtk)
             except (ValueError, IndexError):
@@ -101,10 +114,15 @@ def _analisar_vtks(pasta: Path) -> dict:
     return resumo
 
 
+def _codigo_pede_vtk(codigo: str) -> bool:
+    limpo = _INCLUDE_LINHA_RE.sub("", remover_comentarios(codigo))
+    return bool(_PEDE_VTK_RE.search(limpo))
+
+
 def _checar_resultado(codigo: str, vtks: dict) -> list:
     if not vtks:
         return (["The code calls PostProcess/TPZVTKGenerator, but no .vtk file was written."]
-                if _PEDE_VTK_RE.search(codigo) else [])
+                if _codigo_pede_vtk(codigo) else [])
     problemas = []
     for arquivo, info in vtks.items():
         if info["pontos"] == 0:
@@ -126,6 +144,24 @@ def _checar_resultado(codigo: str, vtks: dict) -> list:
     return problemas
 
 
+def _preparar_arquivos_entrada(codigo: str, pasta_tmp: Path) -> set:
+    copiados = set()
+    mshs = sorted(_RAIZ_RECEITAS.glob("task_*/*.msh")) if _RAIZ_RECEITAS.is_dir() else []
+    for msh in mshs:
+        destino = pasta_tmp / msh.name
+        if not destino.exists():
+            shutil.copy(msh, destino)
+            copiados.add(msh.name)
+    if mshs:
+        padrao_msh = mshs[0]
+        for nome_rel in _ARQUIVO_MSH_RE.findall(codigo):
+            alvo = pasta_tmp / Path(nome_rel).name
+            if not alvo.exists():
+                shutil.copy(padrao_msh, alvo)
+                copiados.add(alvo.name)
+    return copiados
+
+
 def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
     if not _programa_completo(resposta):
         return {"status": "nao_aplicavel"}
@@ -137,9 +173,11 @@ def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
     if not (prefix and compilador and biblioteca and biblioteca.is_file() and includes):
         return {"status": "indisponivel", "motivo": "NeoPZ library or compiler not found"}
 
+    codigo_extraido = _extrair_blocos_codigo(resposta)
     with tempfile.TemporaryDirectory() as tmp:
-        fonte, programa = Path(tmp) / "main.cpp", Path(tmp) / "programa"
-        fonte.write_text(_montar_tu(_extrair_blocos_codigo(resposta)), encoding="utf-8")
+        pasta_tmp = Path(tmp)
+        fonte, programa = pasta_tmp / "main.cpp", pasta_tmp / "programa"
+        fonte.write_text(_montar_tu(codigo_extraido), encoding="utf-8")
         cmd = [compilador, "-std=gnu++17", "-O0", "-w", *_definicoes(prefix), *includes,
                str(fonte), "-o", str(programa),
                f"-Wl,-rpath,{biblioteca.parent}", str(biblioteca)]
@@ -150,6 +188,7 @@ def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
         if build.returncode != 0:
             return {"status": "erro_build", "erros": _erros_de_build(build.stderr)}
 
+        entradas = _preparar_arquivos_entrada(codigo_extraido, pasta_tmp)
         inicio = time.monotonic()
         try:
             proc = subprocess.run([str(programa)], cwd=tmp, capture_output=True, text=True,
@@ -158,20 +197,23 @@ def _executar_codigo(resposta: str, timeout: int = TIMEOUT_EXECUCAO) -> dict:
             saida = (e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             return {"status": "timeout", "saida": _ultimas_linhas(saida), "timeout_s": timeout}
 
-        vtks = _analisar_vtks(Path(tmp)) if proc.returncode == 0 else {}
+        vtks = _analisar_vtks(pasta_tmp) if proc.returncode == 0 else {}
+        ignorar = {"main.cpp", "programa"} | entradas
         resultado = {
             "saida":        _ultimas_linhas(proc.stdout + "\n" + proc.stderr),
-            "arquivos":     sorted(p.name for p in Path(tmp).iterdir()
-                                   if p.name not in {"main.cpp", "programa"}),
+            "arquivos":     sorted(p.name for p in pasta_tmp.iterdir()
+                                   if p.name not in ignorar),
             "tempo_s":      round(time.monotonic() - inicio, 2),
             "codigo_saida": proc.returncode,
         }
-    problemas = _checar_resultado(_extrair_blocos_codigo(resposta), vtks) if proc.returncode == 0 else []
+    problemas = _checar_resultado(codigo_extraido, vtks) if proc.returncode == 0 else []
     if problemas:
         resultado["status"] = "resultado_inconsistente"
         resultado["problemas_resultado"] = problemas
     elif proc.returncode == 0:
         resultado["status"] = "ok"
+    elif _FALHA_ARQUIVO_RE.search(resultado["saida"]):
+        resultado["status"] = "falha_ambiente"
     elif proc.returncode < 0:
         resultado["status"] = "crash"
         resultado["sinal"] = signal.Signals(-proc.returncode).name

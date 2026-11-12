@@ -96,6 +96,7 @@ from .correction import (
     _corrigir_includes_automaticamente,
     _corrigir_enums_automaticamente,
     _corrigir_namespaces_automaticamente,
+    _corrigir_padroes_conhecidos,
 )
 
 from .compilation import (
@@ -239,7 +240,11 @@ def _verificar_resposta(
         cmi = class_methods_index
         heranca_metodos = inheritance_index
 
+    t0_val = time.monotonic()
     if tem_codigo:
+        resposta, correcoes_padroes = _corrigir_padroes_conhecidos(resposta)
+        correcoes_automaticas.extend(correcoes_padroes)
+
         resposta, correcoes_classes = _corrigir_classes_automaticamente(
             resposta, whitelist, renames, destinos=destinos,
             ignorar=set(classes_usuario))
@@ -297,7 +302,9 @@ def _verificar_resposta(
                     or includes_por_classe or metodos_suspeitos
                     or erros_aridade or erros_semanticos or enums_invalidos
                     or namespaces_faltando)
+    t_validacao = round(time.monotonic() - t0_val, 3)
 
+    t0_comp = time.monotonic()
     compilacao = {"status": "nao_executada", "erros": [], "ignorados": 0}
     if nomes_ok and tem_codigo and classes_indisponiveis:
         fora = "; ".join(f"{c} ({m})" for c, m in sorted(classes_indisponiveis.items()))
@@ -317,13 +324,16 @@ def _verificar_resposta(
                   "tratados como artefato do recorte, nenhum acusa API inexistente")
         elif compilacao["status"] == "timeout":
             print(f"  ⚠️  Compilação estourou {TIMEOUT_COMPILACAO}s — ignorada")
+    t_compilacao = round(time.monotonic() - t0_comp, 3)
 
+    t0_exec = time.monotonic()
     execucao = {"status": "nao_executada"}
     if compilacao["status"] == "ok" and _execucao_ligada():
         _emitir(on_evento, "status", "▶️ Running the generated program...")
         execucao = _executar_codigo(resposta)
         print(f"  ▶️  Execução: {execucao['status']}"
               + (f" — {execucao['erros'][0]}" if execucao.get("erros") else ""))
+    t_execucao = round(time.monotonic() - t0_exec, 3)
 
     valido = (nomes_ok and compilacao["status"] != "erros"
               and not _execucao_falhou(execucao))
@@ -369,6 +379,9 @@ def _verificar_resposta(
         "classes_indisponiveis": classes_indisponiveis,
         "classes_usuario":       {n: i["bases"] for n, i in classes_usuario.items()},
         "correcoes_automaticas": correcoes_automaticas,
+        "tempos":                {"validacao_s": t_validacao,
+                                  "compilacao_s": t_compilacao,
+                                  "execucao_s": t_execucao},
     }
 
 
@@ -486,16 +499,20 @@ def gerar_codigo(
     consulta = pergunta
     if historico:
         consulta = f"{historico[-1][0]}\n{pergunta}"
+    t0_rec = time.monotonic()
     h_docs, e_docs, w_docs, fontes = _recuperar_contexto(
         consulta, headers_db, examples_db, wiki_db,
         explicativa=_pergunta_e_explicativa(pergunta),
     )
+    t_recuperacao = round(time.monotonic() - t0_rec, 3)
+
+    contexto = _formatar_contexto(h_docs, e_docs, w_docs)
+    classes_contexto_fixo = _classes_do_contexto(h_docs, e_docs, w_docs)
+    extras_acumulados = []
 
     for tentativa in range(1, MAX_RETRIES + 2):
         print(f"  [Tentativa {tentativa}] Gerando resposta...")
         _emitir(on_evento, "tentativa", str(tentativa))
-
-        contexto = _formatar_contexto(h_docs, e_docs, w_docs)
 
         prompt_txt = _montar_prompt(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
@@ -506,17 +523,19 @@ def gerar_codigo(
             erros_semanticos=erros_semanticos,
             enums_invalidos=enums_invalidos,
             erro_execucao=erro_execucao,
-            classes_contexto=_classes_do_contexto(h_docs, e_docs, w_docs),
+            classes_contexto=classes_contexto_fixo,
             renames=renames,
             historico=historico,
             destinos=whitelist_destino,
             resposta_anterior=resposta_anterior,
+            extras_docs=extras_acumulados or None,
         )
 
         tokens_estimados = len(prompt_txt) // 4
         if type(llm).__name__ == "OllamaLLM" and tokens_estimados > int(NUM_CTX * 0.9):
             print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
+        t0_llm = time.monotonic()
         _MAX_RETRIES_API = 2
         resposta = llm_cache.buscar(llm, prompt_txt)
         if resposta is not None:
@@ -554,6 +573,7 @@ def gerar_codigo(
                     continue
                 raise
         llm_cache.salvar(llm, prompt_txt, resposta)
+        t_llm = round(time.monotonic() - t0_llm, 3)
 
         v = _verificar_resposta(resposta, **recursos, pergunta=pergunta, on_evento=on_evento)
         resposta = v["resposta"]
@@ -569,6 +589,9 @@ def gerar_codigo(
         erros_compilacao = v["compilacao"]["erros"] or None
         erro_execucao = _descrever_falha_execucao(v["execucao"]) or None
 
+        tempos_tentativa = dict(v.get("tempos", {}), llm_s=t_llm)
+        if tentativa == 1:
+            tempos_tentativa["recuperacao_s"] = t_recuperacao
         diagnosticos.append({
             "tentativa":          tentativa,
             "valido":             v["valido"],
@@ -580,6 +603,7 @@ def gerar_codigo(
             "enums_invalidos":    v["enums_invalidos"] or [],
             "erros_compilacao":   (v["compilacao"]["erros"] or [])[:10],
             "erro_execucao":      erro_execucao,
+            "tempos":             tempos_tentativa,
         })
 
         _CAMPOS_DIAGNOSTICO = ("alucinacoes", "includes_errados", "metodos_suspeitos",
@@ -607,6 +631,7 @@ def gerar_codigo(
             print("  ⏳ Aguardando 3s antes de tentar novamente para poupar a API...")
             time.sleep(3)
 
+        docs_atuais = h_docs + extras_acumulados
         classes_reforco = set()
         docs_semanticos = []
         for c in classes_alucinadas or []:
@@ -622,16 +647,16 @@ def gerar_codigo(
             classes_reforco.add(cls)
         classes_reforco |= _classes_citadas_em_erros(erros_compilacao or [], whitelist)
         classes_reforco |= _classes_citadas_em_erros(erros_aridade or [], whitelist)
-        classes_reforco -= {d.metadata.get("classe", "") for d in h_docs}
+        classes_reforco -= {d.metadata.get("classe", "") for d in docs_atuais}
 
         extras = _buscar_declaracoes_por_classe(headers_db, pergunta, classes_reforco, limite=K_HEADERS)
         extras += _buscar_declaracoes_por_nome(
             headers_db, _nomes_citados_em_erros(erros_compilacao or []), limite=2)
         extras = _despriorizar_legado(_dedup_docs(extras + docs_semanticos))
-        ja_presentes = {d.page_content for d in h_docs}
+        ja_presentes = {d.page_content for d in docs_atuais}
         extras = [d for d in extras if d.page_content not in ja_presentes]
         if extras:
-            h_docs = _dedup_docs(h_docs + extras)
+            extras_acumulados = _dedup_docs(extras_acumulados + extras)
             fontes |= {d.metadata.get("source", "?") for d in extras}
             nomes = ", ".join(sorted(
                 {d.metadata.get("classe") or Path(d.metadata.get("source", "?")).name for d in extras}

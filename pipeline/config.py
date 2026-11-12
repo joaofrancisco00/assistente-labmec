@@ -16,7 +16,10 @@ except ImportError:
 try:
     from langchain_huggingface import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
 except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings as _HuggingFaceEmbeddings
+    except ImportError:
+        _HuggingFaceEmbeddings = None
 
 _embeddings_cache = {}
 _global_embeddings = None
@@ -43,7 +46,10 @@ def HuggingFaceEmbeddings(*args, **kwargs):
 try:
     from langchain_chroma import Chroma
 except ImportError:
-    from langchain_community.vectorstores import Chroma
+    try:
+        from langchain_community.vectorstores import Chroma
+    except ImportError:
+        Chroma = None
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 GEMINI_MODEL           = "gemini-3.6-flash"
@@ -104,6 +110,13 @@ MAPA_INTENCAO_CLASSE = {
     r"neumann":                 ["TPZMatLoadCasesBC"],
     r"gmsh|\.msh\b":            ["TPZGmshReader"],
     r"gengrid|structured grid": ["TPZGenGrid2D"],
+    r"h\(div\)|hdiv":           ["TPZCompMesh", "TPZNullMaterial", "TPZCompElHDiv"],
+    r"approx.*creator|hdiv.*creator": ["TPZHDivApproxCreator"],
+    r"\bh1\b.*darcy|darcy.*\bh1\b": ["TPZDarcyFlow"],
+    r"mixed.*darcy|darcy.*mixed":   ["TPZMixedDarcyFlow"],
+    r"adds?\b.*\bnodes?\b|create.*node|manual.*mesh|mesh.*manual": [
+        "TPZGeoMesh", "TPZGeoNode", "TPZManVector",
+    ],
 }
 
 HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",

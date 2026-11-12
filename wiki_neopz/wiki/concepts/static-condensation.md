@@ -18,6 +18,25 @@ tags:
 
 **Entry points (public API).** On a ready `TPZCompMesh`, call `TPZCompMeshTools::CondenseElements(cmesh, LagrangeLevelNotCondensed, keepmatrix)` — `Mesh/TPZCompMeshTools.h` [repo:50]; `LagrangeLevelNotCondensed` is the connect Lagrange level kept uncondensed, `keepmatrix` keeps the reduced Schur matrix. Undo with `TPZCompMeshTools::UnCondensedElements(cmesh)` [repo:56]. For multiphysics meshes the `TPZApproxCreator` subclasses do the whole sequence internally via `GroupAndCondenseElements(TPZMultiphysicsCompMesh*)` (e.g. `TPZH1ApproxCreator`, `TPZHDivApproxCreator` — `Pre/TPZApproxCreator.h` [repo:260]). There is no `TPZCompMesh::CreateCondensedCompEl` and no `RecoverInteriorDOFs`: `TPZCondensedCompEl` wraps an element and exposes the original connects through `Unwrap()`/`fCondensedConnectIndexes`.
 
+```cpp
+#include "pzcmesh.h"
+#include "TPZCompMeshTools.h"
+#include "TPZLinearAnalysis.h"
+
+void ApplyStaticCondensation(TPZCompMesh *cmesh) {
+    // Group and condense interior DOFs (keep one Lagrangian / level 0 uncondensed)
+    TPZCompMeshTools::GroupElements(cmesh);
+    TPZCompMeshTools::CreatedCondensedElements(cmesh, /*KeepOneLagrangian=*/true, /*keepmatrix=*/true);
+
+    TPZLinearAnalysis an(cmesh);
+    an.Assemble();
+    an.Solve();
+
+    // Unwrap condensed elements after solving
+    TPZCompMeshTools::UnCondensedElements(cmesh);
+}
+```
+
 **Invariants to check (Phase 4).** Invertibility of condensed blocks (pivoting? symmetric LDLt assumptions); consistency of recovery step (`LoadSolution` path through condensed wrappers); interaction with equation filters and renumbering; correctness under `SetShouldCondense(false)` + later `GroupAndCondenseElements` (iter_elast does exactly this sequence [repo:224-233]).
 
 Related: [[hybridization]] · [[mixed-methods]] · [[structural-matrices]] · [[mhm]] · [[flow-iter-elast]]

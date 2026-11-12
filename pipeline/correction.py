@@ -1,8 +1,12 @@
 import difflib
+import json
 import re
 from pathlib import Path
 
-from .cpp_parser import find_enum_value_uses, find_tpz_classes_in_code
+from .cpp_parser import (
+    find_enum_value_uses,
+    find_tpz_classes_in_code,
+)
 from .config import (
     CUTOFF_CLASSE_AUTOMATICA,
     CUTOFF_METODO_AUTOMATICO,
@@ -121,8 +125,35 @@ def _corrigir_includes_automaticamente(
     collisions: dict,
     headers_whitelist: set,
 ) -> tuple:
-    if not class_header_index:
+    if not class_header_index and not headers_whitelist:
         return codigo, []
+
+    linhas = codigo.split("\n")
+    correcoes = []
+
+    if headers_whitelist:
+        por_lower = {h.lower(): h for h in headers_whitelist}
+        for i, linha in enumerate(linhas):
+            m = re.search(r'(#include\s*[<"])([^>"]+\.h)([>"])', linha)
+            if not m:
+                continue
+            caminho_inc = m.group(2)
+            nome = Path(caminho_inc).name
+            if nome in headers_whitelist or nome.lower() not in por_lower:
+                continue
+            if nome.lower() in INCLUDES_LIXO_CONHECIDOS:
+                continue
+            nome_real = por_lower[nome.lower()]
+            novo_caminho = (
+                str(Path(caminho_inc).with_name(nome_real))
+                if "/" in caminho_inc
+                else nome_real
+            )
+            linhas[i] = linha[:m.start(2)] + novo_caminho + linha[m.end(2):]
+            correcoes.append(f'#include "{caminho_inc}" → "{novo_caminho}"')
+
+    if not class_header_index:
+        return "\n".join(linhas), correcoes
 
     usadas = find_tpz_classes_in_code(codigo)
     necessarios = {
@@ -130,8 +161,6 @@ def _corrigir_includes_automaticamente(
         for classe in usadas
         if classe not in collisions and class_header_index.get(classe)
     }
-
-    linhas = codigo.split("\n")
 
     def _includes_atuais(linhas: list) -> dict:
         atuais = {}
@@ -157,7 +186,7 @@ def _corrigir_includes_automaticamente(
         linhas = [l for i, l in enumerate(linhas) if i not in linhas_remover]
 
     if not necessarios:
-        return "\n".join(linhas), []
+        return "\n".join(linhas), correcoes
 
     atuais = _includes_atuais(linhas)
     faltando   = {}
@@ -172,7 +201,6 @@ def _corrigir_includes_automaticamente(
         elif presente[1] != forma_certa:
             a_corrigir[c] = (presente[0], presente[1], forma_certa)
 
-    correcoes = []
     for c, (idx, caminho_errado, forma_certa) in a_corrigir.items():
         padrao_linha = re.compile(r'(#include\s*[<"])' + re.escape(caminho_errado) + r'([>"])')
         nova_linha, n = padrao_linha.subn(r'\g<1>' + forma_certa + r'\g<2>', linhas[idx], count=1)
@@ -231,3 +259,132 @@ def _corrigir_enums_automaticamente(codigo: str, enum_index: dict) -> tuple:
             if n:
                 correcoes.append(f"{enum}::{errado} → {enum}::{certo}")
     return codigo, correcoes
+
+
+_PADROES_API_FILE = Path(__file__).resolve().parent.parent / "patches" / "padroes_api.json"
+_padroes_api_cache = None
+
+_TOPO_CLASSID_RE = re.compile(
+    r'(?:[A-Za-z_]\w*\s*::\s*)*\b(TPZ\w+)\s*::\s*(?:ClassId|Type)\s*\(\s*\)')
+_AUTOPTR_VAL_RE = re.compile(
+    r'\b(TPZAutoPointer\s*<\s*(TPZ\w+)\s*>\s+\w+\s*=\s*)\2\s*\(')
+_CREATE_EL_ASSIGN_LIT_RE = re.compile(
+    r'^([ \t]*)(?:int64_t|int|auto)\s+(\w+)\s*=\s*'
+    r'(\w+\s*(?:->|\.)\s*CreateGeoElement\s*\([^,;\n]+,[^,;\n]+,[^,;\n]+),\s*-?\d+\s*\)\s*;',
+    re.MULTILINE)
+_CREATE_EL_ASSIGN_3ARGS_RE = re.compile(
+    r'^([ \t]*)(?:int64_t|int|auto)\s+(\w+)\s*=\s*'
+    r'(\w+\s*(?:->|\.)\s*CreateGeoElement\s*\([^,;\n()]+,[^,;\n()]+,[^,;\n()]+)\)\s*;',
+    re.MULTILINE)
+_CREATE_EL_BARE_LIT_RE = re.compile(
+    r'^([ \t]*)(\w+\s*(?:->|\.)\s*CreateGeoElement\s*\([^,;\n]+,[^,;\n]+,[^,;\n]+),\s*-?\d+\s*\)\s*;',
+    re.MULTILINE)
+_CREATE_EL_BARE_3ARGS_RE = re.compile(
+    r'^([ \t]*)(\w+\s*(?:->|\.)\s*CreateGeoElement\s*\([^,;\n()]+,[^,;\n()]+,[^,;\n()]+)\)\s*;',
+    re.MULTILINE)
+
+
+def _carregar_padroes_api() -> dict:
+    global _padroes_api_cache
+    if _padroes_api_cache is None:
+        try:
+            _padroes_api_cache = json.loads(_PADROES_API_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _padroes_api_cache = {}
+    return _padroes_api_cache
+
+
+def _corrigir_padroes_conhecidos(codigo: str) -> tuple:
+    """Reescreve anti-padrões recorrentes de API sem chamar o LLM (0 ms):
+    - chamadas no-op inventadas (ex: TPZVTKGenerator::SetSolution)
+    - TPZTriangle::ClassId() em CreateGeoElement → ETriangle
+    - CreateGeoElement com literal no 4º arg ou com 3 args → int64_t &index
+    - TPZAutoPointer<T> x = T() → new T()
+    """
+    regras = _carregar_padroes_api()
+    mapa_topo = regras.get("topology_class_to_element_type", {})
+    noops = regras.get("removed_noop_calls", [])
+    correcoes = []
+
+    def _corrigir_trecho(bloco: str) -> str:
+        # 1. Chamadas no-op inventadas (ex: vtk.SetSolution(...);)
+        for item in noops:
+            cls = item.get("class", "")
+            metodo = item.get("method", "")
+            if cls and metodo and cls in bloco:
+                padrao = re.compile(
+                    r'^[ \t]*\w+\s*(?:\.|->)\s*' + re.escape(metodo)
+                    + r'\s*\([^;\n]*\)\s*;[ \t]*\n?', re.MULTILINE)
+                bloco, n = padrao.subn("", bloco)
+                if n:
+                    msg = item.get("reason") or f"{cls}::{metodo} removed"
+                    if msg not in correcoes:
+                        correcoes.append(msg)
+
+        # 3. TPZTriangle::ClassId() → ETriangle
+        def _sub_topo(m):
+            cls = m.group(1)
+            if cls in mapa_topo:
+                 enum_val = mapa_topo[cls]
+                 msg = f"{m.group(0)} → {enum_val}"
+                 if msg not in correcoes:
+                     correcoes.append(msg)
+                 return enum_val
+            return m.group(0)
+
+        if mapa_topo:
+            bloco = _TOPO_CLASSID_RE.sub(_sub_topo, bloco)
+
+        # 4. CreateGeoElement: 4º arg literal ou 3 args → int64_t &index
+        bloco, n1 = _CREATE_EL_ASSIGN_LIT_RE.subn(
+            r'\1int64_t \2 = -1;\n\1\3, \2);', bloco)
+        bloco, n2 = _CREATE_EL_ASSIGN_3ARGS_RE.subn(
+            r'\1int64_t \2 = -1;\n\1\3, \2);', bloco)
+        if n1 or n2:
+            msg = "CreateGeoElement → 4 args with int64_t &index"
+            if msg not in correcoes:
+                correcoes.append(msg)
+
+        for regex_bare in (_CREATE_EL_BARE_LIT_RE, _CREATE_EL_BARE_3ARGS_RE):
+            if regex_bare.search(bloco):
+                ja_tem_elidx = bool(re.search(r'\bint64_t\s+elIndex\b', bloco))
+                def _sub_bare(m):
+                    nonlocal ja_tem_elidx
+                    indent, prefixo = m.group(1), m.group(2)
+                    if not ja_tem_elidx:
+                        ja_tem_elidx = True
+                        return f"{indent}int64_t elIndex = -1;\n{indent}{prefixo}, elIndex);"
+                    return f"{indent}{prefixo}, elIndex);"
+                bloco, n_b = regex_bare.subn(_sub_bare, bloco)
+                if n_b:
+                    msg = "CreateGeoElement → 4 args with int64_t &index"
+                    if msg not in correcoes:
+                        correcoes.append(msg)
+
+        # 5. TPZAutoPointer<TPZFoo> x = TPZFoo( → new TPZFoo(
+        def _sub_autoptr(m):
+            cls = m.group(2)
+            msg = f"TPZAutoPointer<{cls}> = {cls}() → new {cls}()"
+            if msg not in correcoes:
+                correcoes.append(msg)
+            return f"{m.group(1)}new {cls}("
+
+        bloco = _AUTOPTR_VAL_RE.sub(_sub_autoptr, bloco)
+
+        # 6. gmesh.CreateUniqueNodeId() → gmesh.NodeVec().AllocateNewElement()
+        bloco, n_node = re.subn(
+            r'\b(\w+)\s*(->|\.)\s*CreateUniqueNodeId\s*\(\s*\)',
+            r'\1\2NodeVec().AllocateNewElement()',
+            bloco,
+        )
+        if n_node:
+            msg = "CreateUniqueNodeId() → NodeVec().AllocateNewElement()"
+            if msg not in correcoes:
+                correcoes.append(msg)
+        return bloco
+
+    if _BLOCO_CODIGO_RE.search(codigo):
+        corrigido = _BLOCO_CODIGO_RE.sub(lambda m: _corrigir_trecho(m.group(0)), codigo)
+    else:
+        corrigido = _corrigir_trecho(codigo)
+    return corrigido, correcoes

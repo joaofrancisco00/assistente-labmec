@@ -321,6 +321,31 @@ class TestChecagemDoResultado(unittest.TestCase):
         self.assertTrue(self._checar(None))
         self.assertEqual(self._checar(None, codigo="int x = 1;"), [])
 
+    def test_vtk_apenas_em_include_ou_comentario_nao_exige_arquivo(self):
+        codigo = (
+            '#include "TPZVTKGenerator.h" // TPZVTKGenerator\n'
+            '/* Do not call PostProcess here */\n'
+            'int main() { return 0; }\n'
+        )
+        self.assertEqual(self._checar(None, codigo=codigo), [])
+
+    def test_falha_ambiente_arquivo_ausente_nao_dispara_retry(self):
+        exec_amb = {
+            "status": "falha_ambiente",
+            "sinal": "SIGABRT",
+            "saida": "Couldn't open the file square.msh",
+            "arquivos": [],
+        }
+        self.assertFalse(execucao._execucao_falhou(exec_amb))
+        self.assertEqual(execucao._descrever_falha_execucao(exec_amb), "")
+
+    def test_preparar_arquivos_entrada_copia_msh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pasta = Path(tmp)
+            copiados = execucao._preparar_arquivos_entrada('ReadGmsh("square.msh");', pasta)
+            self.assertIn("square.msh", copiados)
+            self.assertTrue((pasta / "square.msh").exists())
+
     def test_resultado_normal_passa(self):
         self.assertEqual(self._checar(_vtk(2, {"Solution": ("SCALARS", [0.1, 0.2]),
                                                "Derivative": ("VECTORS", [1, 0, 0, 1, 0, 0])})), [])

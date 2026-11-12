@@ -9,7 +9,6 @@ Diferenças em relação ao indexer anterior:
             + reindexação limpa (remove coleção antiga — sem duplicatas)
             + parse único dos headers (whitelists e índices derivados dele)
 """
-import re
 import sys
 from pathlib import Path
 from tqdm import tqdm
@@ -35,6 +34,9 @@ from pipeline.cpp_parser import (
     build_class_methods_index_from_chunks,
     build_enum_values_index,
     build_class_namespace_index,
+    clean_cpp_example,
+    reattach_orphan_signatures,
+    filter_cpp_example_chunk,
 )
 
 # ── Configurações ──────────────────────────────────────────────────────────────
@@ -205,26 +207,20 @@ def _indexar_exemplos(embeddings):
         except Exception:
             continue
 
-        for chunk in splitter.split_text(content):
-            # Filtro 1: Licenças puras ou boilerplate longo
-            if "This file is part of the PZ environment" in chunk or "Universidade Estadual de Campinas" in chunk:
-                if len(chunk.strip()) < 1000:
-                    continue
-
-            # Registra quais classes TPZ aparecem nesse trecho (ajuda no retrieval)
-            tpz_classes = ", ".join(set(re.findall(r'\bTPZ[A-Z]\w+', chunk)))
-            
-            # Filtro 2: Trechos vazios de lógica (só chaves, includes) e sem menção à biblioteca
-            if not tpz_classes:
-                linhas_uteis = [l for l in chunk.splitlines() if l.strip() and not l.strip().startswith('#include')]
-                if len('\n'.join(linhas_uteis).strip()) < 150:
-                    continue
+        cleaned = clean_cpp_example(content)
+        if not cleaned:
+            continue
+        raw_chunks = reattach_orphan_signatures(splitter.split_text(cleaned))
+        for chunk in raw_chunks:
+            aprovado, tpz_classes = filter_cpp_example_chunk(chunk)
+            if not aprovado:
+                continue
 
             documents.append(Document(
                 page_content=chunk,
                 metadata={
-                    "source":        str(cpp_file),
-                    "tipo":          "exemplo",
+                    "source":         str(cpp_file),
+                    "tipo":           "exemplo",
                     "classes_usadas": tpz_classes,
                 }
             ))

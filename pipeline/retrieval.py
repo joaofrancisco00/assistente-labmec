@@ -40,7 +40,7 @@ def _rerank_docs(pergunta: str, docs: list, top_k: int,
         for i, doc in enumerate(docs):
             doc.metadata["rerank_score"] = float(scores[i])
 
-        scored_docs = list(zip(scores, docs, strict=True))
+        scored_docs = list(zip(scores[:len(docs)], docs, strict=True))
         scored_docs.sort(key=lambda x: x[0], reverse=True)
         if min_score is not None:
             n_antes = len(scored_docs)
@@ -221,6 +221,10 @@ def _recuperar_contexto(pergunta: str, headers_db, examples_db, wiki_db=None,
                                   RERANK_MIN_WIKI, "wiki") # Corte antes da reserva de conceitos
         w_docs = _reservar_vagas_conceitos(w_reranked, K_WIKI, K_WIKI_CONCEITOS)
         w_docs = _dedup_docs(cards_garantidos + w_docs)
+        if any(d.metadata.get("tipo") == "doc_fluxo"
+               and d.metadata.get("rerank_score", 0.0) >= 5.0
+               for d in w_docs):
+            e_docs = e_docs[:1]
 
     all_docs = h_docs + e_docs + w_docs
     fontes = {doc.metadata.get("source", "?") for doc in all_docs}
