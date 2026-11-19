@@ -259,7 +259,7 @@ def _verificar_resposta(
 
         metodos_suspeitos_pre_correcao, _ = _validar_metodos(resposta, metodos_wl, wl_metodos, cmi, heranca_metodos)
         resposta, correcoes_metodos = _corrigir_metodos_automaticamente(
-            resposta, metodos_suspeitos_pre_correcao, class_methods_index,
+            resposta, metodos_suspeitos_pre_correcao, cmi, heranca_metodos,
         )
         correcoes_automaticas.extend(correcoes_metodos)
 

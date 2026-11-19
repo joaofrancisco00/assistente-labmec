@@ -95,6 +95,34 @@ class TestCorrecaoAutomatica(unittest.TestCase):
         self.assertIn("gmesh->Print()", corrigido)
         self.assertEqual(correcoes, ["TPZGeoMesh::Prnt → TPZGeoMesh::Print"])
 
+    def test_metodo_herdado_da_base_e_corrigido(self):
+        codigo = "an.Soluton();\nint id = mat->GetId();"
+        indice = {
+            "TPZLinearAnalysis": ["Assemble"],
+            "TPZAnalysis": ["Solution", "Solve"],
+            "TPZMatPoisson": ["SetForcingFunction"],
+            "TPZMaterial": ["Id", "Print"],
+        }
+        heranca = {
+            "TPZLinearAnalysis": ["TPZAnalysis"],
+            "TPZMatPoisson": ["TPZMaterial"],
+        }
+        corrigido, correcoes = pipeline._corrigir_metodos_automaticamente(
+            codigo,
+            [("TPZLinearAnalysis", "Soluton"), ("TPZMatPoisson", "GetId")],
+            indice,
+            heranca,
+        )
+        self.assertIn("an.Solution()", corrigido)
+        self.assertIn("mat->Id()", corrigido)
+        self.assertEqual(
+            correcoes,
+            [
+                "TPZLinearAnalysis::Soluton → TPZLinearAnalysis::Solution",
+                "TPZMatPoisson::GetId → TPZMatPoisson::Id",
+            ],
+        )
+
     def test_include_qualificado_para_material_da_api_nova(self):
         # Descoberto compilando as receitas: headers da API nova de materiais
         # ficam em subpastas (Material/Poisson/...) e o include precisa do

@@ -86,7 +86,40 @@ def _corrigir_namespaces_automaticamente(codigo: str, namespace_index: dict) -> 
     return corrigido, correcoes
 
 
-def _corrigir_metodos_automaticamente(codigo: str, metodos_suspeitos: list, class_methods_index: dict) -> tuple:
+def _metodos_da_hierarquia(
+    classe: str,
+    class_methods_index: dict,
+    inheritance_index: dict = None,
+    max_niveis: int = 5,
+) -> list:
+    vistos = {classe}
+    fila = [classe]
+    nivel = 0
+    metodos = []
+    metodos_set = set()
+    while fila and nivel <= max_niveis:
+        proximo = []
+        for c in fila:
+            for m in class_methods_index.get(c, ()):
+                if m not in metodos_set:
+                    metodos_set.add(m)
+                    metodos.append(m)
+            if inheritance_index:
+                for base in inheritance_index.get(c, ()):
+                    if base not in vistos:
+                        vistos.add(base)
+                        proximo.append(base)
+        fila = proximo
+        nivel += 1
+    return metodos
+
+
+def _corrigir_metodos_automaticamente(
+    codigo: str,
+    metodos_suspeitos: list,
+    class_methods_index: dict,
+    inheritance_index: dict = None,
+) -> tuple:
     if not class_methods_index or not metodos_suspeitos:
         return codigo, []
 
@@ -100,7 +133,9 @@ def _corrigir_metodos_automaticamente(codigo: str, metodos_suspeitos: list, clas
 
     correcoes = []
     for classe, errado in metodos_suspeitos:
-        candidatos_da_classe = class_methods_index.get(classe)
+        candidatos_da_classe = _metodos_da_hierarquia(
+            classe, class_methods_index, inheritance_index
+        )
         if not candidatos_da_classe:
             continue
             
