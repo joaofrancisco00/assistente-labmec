@@ -498,7 +498,10 @@ def gerar_codigo(
 
     consulta = pergunta
     if historico:
-        consulta = f"{historico[-1][0]}\n{pergunta}"
+        perg_ant, resp_ant = historico[-1]
+        classes_ant = sorted(find_tpz_classes_in_code(resp_ant or ""))[:6]
+        sufixo_cls = f" ({' '.join(classes_ant)})" if classes_ant else ""
+        consulta = f"{perg_ant}{sufixo_cls}\n{pergunta}"
     t0_rec = time.monotonic()
     h_docs, e_docs, w_docs, fontes = _recuperar_contexto(
         consulta, headers_db, examples_db, wiki_db,

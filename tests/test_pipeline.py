@@ -586,6 +586,30 @@ class TestHistoricoDeConversa(unittest.TestCase):
         # a tarefa atual continua sendo a pergunta nova
         self.assertIn("Task: e como refino essa malha?", prompt)
 
+    def test_followup_preserva_classes_da_resposta_anterior_na_busca(self):
+        consultas = []
+
+        def _fake_rec(consulta, *a, **kw):
+            consultas.append(consulta)
+            return [], [], [], set()
+
+        llm = _LLMFalso("Resposta textual de seguimento.")
+        with patch.object(pipeline, "_recuperar_contexto", side_effect=_fake_rec), \
+             redirect_stdout(io.StringIO()):
+            pipeline.gerar_codigo(
+                "Now change it to order 3",
+                llm=llm,
+                headers_db=MockDB(),
+                examples_db=MockDB(),
+                whitelist={"TPZDarcyFlow"},
+                headers_whitelist=set(),
+                system_base="sistema",
+                historico=[("solve darcy", "```cpp\nTPZDarcyFlow *m = new TPZDarcyFlow(1, 2);\n```")],
+            )
+        self.assertEqual(len(consultas), 1)
+        self.assertIn("TPZDarcyFlow", consultas[0])
+        self.assertIn("Now change it to order 3", consultas[0])
+
 
 class TestDeteccaoDeCodigo(unittest.TestCase):
     def test_prosa_nao_e_codigo(self):
