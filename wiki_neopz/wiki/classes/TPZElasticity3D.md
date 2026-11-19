@@ -2,7 +2,7 @@
 
 Generated from `Material/Elasticity/TPZElasticity3D.h` — do not edit by hand.
 
-Include: `"Material/Elasticity/TPZElasticity3D.h"` (no código: #include "Material/Elasticity/TPZElasticity3D.h")
+Include: `"Elasticity/TPZElasticity3D.h"` (in C++ code: `#include "Elasticity/TPZElasticity3D.h"`)
 
 Public methods (exact declarations from the header):
 - `TPZElasticity3D(int nummat, STATE E, STATE poisson, TPZVec<STATE> &force, STATE preStressXX = 0., STATE preStressYY = 0., STATE preStressZZ = 0.)`

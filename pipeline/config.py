@@ -118,7 +118,7 @@ MAPA_INTENCAO_CLASSE = {
         "TPZGeoMesh", "TPZGeoNode", "TPZManVector",
     ],
     r"poisson|laplac": ["TPZMatPoisson", "TPZGeoMeshTools"],
-    r"h\(?curl\)?|curl": ["TPZHCurlApproxCreator", "TPZCompMesh"],
+    r"h\(?curl\)?|curl": ["TPZCompElHCurl", "TPZHCurlProjection", "TPZCompMesh"],
     r"l2.*error|exact.*sol|evaluate.*error|postprocesserror|erro.*l2|solu[çc][ãa]o.*exata": [
         "TPZLinearAnalysis", "TPZMatErrorSingleSpace", "TPZMatPoisson",
     ],

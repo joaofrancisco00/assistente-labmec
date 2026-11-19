@@ -2,7 +2,7 @@
 
 Generated from `Post/TPZVTKGenerator.h` — do not edit by hand.
 
-Include: `"Post/TPZVTKGenerator.h"` (no código: #include "Post/TPZVTKGenerator.h")
+Include: `"TPZVTKGenerator.h"` (in C++ code: `#include "TPZVTKGenerator.h"`)
 
 Public methods (exact declarations from the header):
 - `TPZVTKGenerator(TPZCompMesh* cmesh, const TPZVec<std::string> &fields, std::string filename, int vtkres, int dim = -1, bool safe_check = false)`

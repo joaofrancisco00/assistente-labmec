@@ -2,7 +2,7 @@
 
 Generated from `Util/pzmanvector.h` — do not edit by hand.
 
-Include: `"Util/pzmanvector.h"` (no código: #include "Util/pzmanvector.h")
+Include: `"pzmanvector.h"` (in C++ code: `#include "pzmanvector.h"`)
 
 Public methods (exact declarations from the header):
 - `explicit TPZManVector(const int64_t size = 0)`

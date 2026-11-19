@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 HEADER_INDEX = Path("header_index/class_header_index.json")
+COLLISIONS_INDEX = Path("header_index/collisions.json")
 METHODS_INDEX = Path("banco_chroma_develop/class_methods_index.json")
 NEOPZ_DIR = Path("base_de_dados/neopz")
 SAIDA_DIR = Path("wiki_neopz/wiki/classes")
@@ -149,7 +150,40 @@ _NOTAS_CARDS = {
         "Canonical static condensation sequence on `TPZCompMesh *cmesh`: `TPZCompMeshTools::GroupElements(cmesh); TPZCompMeshTools::CreatedCondensedElements(cmesh, true);` (or `TPZCompMeshTools::CondenseElements(cmesh, 0, true);`), then solve with `TPZLinearAnalysis an(cmesh); an.Assemble(); an.Solve();`, then `TPZCompMeshTools::UnCondensedElements(cmesh);`.",
         "`TPZLinearAnalysis::SetMaterial` and `TPZNonLinMultGridAnalysis` do NOT exist — materials belong in `cmesh->InsertMaterialObject(mat)`.",
     ],
+    "TPZBndCondT": [
+        "Never instantiate directly with `new TPZBndCondT` — always create via `TPZBndCondT<STATE> *bc = mat->CreateBC(mat, bcId, bcType, val1, val2);` and insert with `cmesh->InsertMaterialObject(bc);` (types: 0 = Dirichlet, 1 = Neumann, 2 = Robin/mixed).",
+        "For position-dependent (non-constant) boundary conditions, call `bc->SetForcingFunctionBC(bcFunc, pOrder);` where `bcFunc` takes 3 arguments: `[](const TPZVec<REAL> &loc, TPZVec<STATE> &val, TPZFMatrix<STATE> &deriv) { val[0] = ...; }`. (`SetForcingFunction` with 2 args is for domain materials, NOT `TPZBndCondT`).",
+    ],
+    "TPZHDivApproxCreator": [
+        "Set polynomial order with `hdivCreator.SetDefaultOrder(pOrder);` (`HdivFamily()` is a getter taking 0 args; to change family call `SetHdivFamily(HDivFamily::EHDivStandard)` with values from `TPZEnumApproxFamily.h`: `EHDivStandard`, `EHDivConstant`, `EHDivKernel`).",
+    ],
+    "TPZGeoMeshTools": [
+        "`CreateGeoMeshOnGrid` ONLY supports `dim = 2` or `dim = 3` (calling it with `dim = 1` triggers `DebugStop()` at runtime). For 1D meshes, allocate nodes with `gmesh->NodeVec().AllocateNewElement()` and create `EOned` elements with `gmesh->CreateGeoElement(EOned, nodeIndices, matId, elIndex)`.",
+    ],
+    "TPZLinearAnalysis": [
+        "To compute exact L2/H1 errors: call `an.SetExact(exactSol, pOrder);` (signature `void(const TPZVec<REAL> &loc, TPZVec<STATE> &u, TPZFMatrix<STATE> &gradU)`) and `TPZManVector<REAL, 3> errors(3, 0.); an.PostProcessError(errors, false);` (`ComputeErrors` does NOT exist).",
+    ],
 }
+
+
+def _include_curto(header_rel: str) -> str:
+    partes = Path(header_rel).parts
+    if len(partes) >= 3 and partes[0] == "Material":
+        return "/".join(partes[1:])
+    return Path(header_rel).name
+
+
+def _resolver_header(nome: str, index: dict, collisions: dict):
+    header_rel = index.get(nome)
+    if header_rel is not None:
+        return header_rel
+    candidatos = [
+        c for c in collisions.get(nome, [])
+        if "needrefactor" not in Path(c).parts and "PerfTests" not in Path(c).parts
+    ]
+    if len(candidatos) == 1:
+        return candidatos[0]
+    return None
 
 
 def gerar_card(nome: str, header_rel: str) -> str:
@@ -159,12 +193,13 @@ def gerar_card(nome: str, header_rel: str) -> str:
     texto = re.sub(r"/\*.*?\*/", "", texto, flags=re.DOTALL)
     linhas = texto.splitlines()
     decls = extrair_publicos(linhas, nome)
+    inc = _include_curto(header_rel)
 
     out = [f"# {nome} — API card",
            "",
            f"Generated from `{header_rel}` — do not edit by hand.",
            "",
-           f'Include: `"{header_rel}"` (no código: #include "{header_rel}")',
+           f'Include: `"{inc}"` (in C++ code: `#include "{inc}"`)',
            "",
            "Public methods (exact declarations from the header):"]
     out += [f"- `{d}`" for d in decls] or ["- (nenhuma declaração pública encontrada)"]
@@ -177,6 +212,7 @@ def gerar_card(nome: str, header_rel: str) -> str:
 def main():
     args = sys.argv[1:]
     index = json.loads(HEADER_INDEX.read_text())
+    collisions = json.loads(COLLISIONS_INDEX.read_text()) if COLLISIONS_INDEX.exists() else {}
 
     if args == ["--todas"]:
         metodos = json.loads(METHODS_INDEX.read_text())
@@ -191,7 +227,7 @@ def main():
     SAIDA_DIR.mkdir(parents=True, exist_ok=True)
     escritos = 0
     for nome in alvos:
-        header_rel = index.get(nome)
+        header_rel = _resolver_header(nome, index, collisions)
         if header_rel is None:
             print(f"  ❌ {nome}: não está em {HEADER_INDEX}")
             continue

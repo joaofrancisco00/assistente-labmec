@@ -1296,7 +1296,7 @@ class TestIntencoesNovasEPodaExemplos(unittest.TestCase):
             pipeline.retrieval._classes_por_intencao("Solve a Poisson problem"),
         )
         self.assertIn(
-            "TPZHCurlApproxCreator",
+            "TPZCompElHCurl",
             pipeline.retrieval._classes_por_intencao("Create an H(curl) space"),
         )
         self.assertIn(

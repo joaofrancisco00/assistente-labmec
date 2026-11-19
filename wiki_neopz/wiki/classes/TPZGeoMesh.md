@@ -2,7 +2,7 @@
 
 Generated from `Mesh/pzgmesh.h` — do not edit by hand.
 
-Include: `"Mesh/pzgmesh.h"` (no código: #include "Mesh/pzgmesh.h")
+Include: `"pzgmesh.h"` (in C++ code: `#include "pzgmesh.h"`)
 
 Public methods (exact declarations from the header):
 - `TPZGeoMesh()`

@@ -2,7 +2,7 @@
 
 Generated from `Mesh/TPZCompMeshTools.h` — do not edit by hand.
 
-Include: `"Mesh/TPZCompMeshTools.h"` (no código: #include "Mesh/TPZCompMeshTools.h")
+Include: `"TPZCompMeshTools.h"` (in C++ code: `#include "TPZCompMeshTools.h"`)
 
 Public methods (exact declarations from the header):
 - `void AddHDivPyramidRestraints(TPZCompMesh *cmesh)`

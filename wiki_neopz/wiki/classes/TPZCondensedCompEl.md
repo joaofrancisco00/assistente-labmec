@@ -2,7 +2,7 @@
 
 Generated from `Mesh/pzcondensedcompel.h` — do not edit by hand.
 
-Include: `"Mesh/pzcondensedcompel.h"` (no código: #include "Mesh/pzcondensedcompel.h")
+Include: `"pzcondensedcompel.h"` (in C++ code: `#include "pzcondensedcompel.h"`)
 
 Public methods (exact declarations from the header):
 - `virtual ~TPZCondensedCompEl()`

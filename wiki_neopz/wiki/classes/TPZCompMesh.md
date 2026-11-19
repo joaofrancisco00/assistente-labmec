@@ -1,0 +1,128 @@
+# TPZCompMesh — API card
+
+Generated from `Mesh/pzcmesh.h` — do not edit by hand.
+
+Include: `"pzcmesh.h"` (in C++ code: `#include "pzcmesh.h"`)
+
+Public methods (exact declarations from the header):
+- `TPZCompMesh(TPZGeoMesh* gr, bool isComplex=false)`
+- `TPZCompMesh(TPZAutoPointer<TPZGeoMesh> &gmesh, bool isComplex = false)`
+- `TPZCompMesh(const TPZCompMesh &copy)`
+- `TPZCompMesh &operator=(const TPZCompMesh &copy)`
+- `virtual ~TPZCompMesh()`
+- `ESolType GetSolType() const`
+- `virtual REAL CompareMesh(int var, char *matname)`
+- `void GetRefPatches(std::set<TPZGeoEl *> &grpatch)`
+- `void GetNodeToElGraph(TPZVec<int64_t> &nodtoelgraph, TPZVec<int64_t> &nodtoelgraphinde,TPZStack<int64_t> &elgraph, TPZVec<int64_t> &elgraphindexx)`
+- `void GetElementPatch(TPZVec<int64_t> nodtoelgraph, TPZVec<int64_t> nodtoelgraphindex, TPZStack<int64_t> &elgraph, TPZVec<int64_t> &elgraphindex,int64_t elind ,TPZStack<int64_t> &patch)`
+- `void SetName(const std::string &nm)`
+- `void SetDimModel(int dim)`
+- `void SetReference(TPZGeoMesh * gmesh)`
+- `void SetReference(TPZAutoPointer<TPZGeoMesh> &gmesh)`
+- `int Dimension() const`
+- `std::string &Name()`
+- `void CleanUp()`
+- `int64_t NConnects() const`
+- `int64_t NIndependentConnects()`
+- `int64_t NElements() const`
+- `size_t NMaterials() const`
+- `TPZAdmChunkVector<TPZCompEl *> &ElementVec()`
+- `TPZCompEl * Element(int64_t iel)`
+- `const TPZCompEl * Element(int64_t iel) const`
+- `const TPZAdmChunkVector<TPZCompEl *> &ElementVec() const`
+- `TPZAdmChunkVector<TPZConnect> &ConnectVec()`
+- `const TPZAdmChunkVector<TPZConnect> &ConnectVec() const`
+- `std::map<int ,TPZMaterial * > &MaterialVec()`
+- `std::map<int ,TPZMaterial * > MaterialVec() const`
+- `TPZGeoMesh *Reference() const`
+- `const TPZBlock &Block() const`
+- `TPZBlock &Block()`
+- `TPZSolutionMatrix &Solution()`
+- `const TPZSolutionMatrix &Solution() const`
+- `TPZSolutionMatrix &SolutionN()`
+- `TPZSolutionMatrix &ElementSolution()`
+- `void ExpandElementSolution(int ncols)`
+- `virtual int64_t AllocateNewConnect(int nshape, int nstate, int order)`
+- `virtual int64_t AllocateNewConnect(const TPZConnect &connect)`
+- `int InsertMaterialObject(TPZMaterial * mat)`
+- `int InsertMaterialObject(TPZBndCond * mat)`
+- `void InitializeBlock()`
+- `virtual void ExpandSolution()`
+- `template<class TVar> void SetElementSolution(int64_t i, TPZVec<TVar> &sol)`
+- `virtual void Print(std::ostream & out = std::cout) const`
+- `virtual void ShortPrint(std::ostream &out = std::cout) const`
+- `void ConnectSolution(std::ostream & out)`
+- `TPZMaterial * FindMaterial(int id)`
+- `void LoadReferences()`
+- `virtual void ComputeNodElCon()`
+- `virtual void ComputeNodElCon(TPZVec<int> &nelconnected) const`
+- `virtual void CleanUpUnconnectedNodes()`
+- `void ComputeElGraph(TPZStack<int64_t> &elgraph, TPZVec<int64_t> &elgraphindex)`
+- `void ComputeElGraph(TPZStack<int64_t> &elgraph, TPZVec<int64_t> &elgraphindex, std::set<int> & mat_ids)`
+- `virtual void BuildCornerConnectList(std::set<int64_t> &connectindexes) const`
+- `virtual TPZCompMesh *FatherMesh() const`
+- `virtual void MakeInternal(int64_t local)`
+- `virtual void MakeAllInternal()`
+- `virtual TPZCompMesh* RootMesh (int64_t local)`
+- `virtual int64_t TransferElementFrom(TPZCompMesh *mesh, int64_t elindex)`
+- `virtual int64_t TransferElementTo(TPZCompMesh *mesh, int64_t elindex)`
+- `virtual int64_t TransferElement(TPZCompMesh *mesh, int64_t elindex)`
+- `virtual int64_t PutinSuperMesh (int64_t local, TPZCompMesh *super)`
+- `virtual int64_t GetFromSuperMesh (int64_t superind, TPZCompMesh *super)`
+- `virtual TPZCompMesh * CommonMesh (TPZCompMesh *mesh)`
+- `int GetDefaultOrder()`
+- `void SetDefaultOrder( int order )`
+- `int64_t NEquations()`
+- `int BandWidth()`
+- `virtual void Skyline(TPZVec<int64_t> &skyline)`
+- `void BuildTransferMatrix(TPZCompMesh &coarsemesh, TPZTransfer<STATE> &transfer)`
+- `void BuildTransferMatrixDesc(TPZCompMesh &transfermesh,TPZTransfer<STATE> &transfer)`
+- `template<class TVar> void ProjectSolution(TPZFMatrix<TVar> &projectsol)`
+- `void SetNMeshes(int64_t nmeshes)`
+- `int64_t GetNMeshes()`
+- `TPZCompEl *CreateCompEl(TPZGeoEl *gel)`
+- `virtual void AutoBuild(const std::set<int> &MaterialIDs)`
+- `virtual void AutoBuild()`
+- `void AutoBuild(const TPZVec<int64_t> &gelindexes)`
+- `virtual void AutoBuildContDisc(const TPZVec<TPZGeoEl*> &continuous, const TPZVec<TPZGeoEl*> &discontinuous)`
+- `TPZCreateApproximationSpace &ApproxSpace()`
+- `void SetAllCreateFunctionsDiscontinuous()`
+- `void SetAllCreateFunctionsContinuous()`
+- `void SetAllCreateFunctionsHDiv()`
+- `void SetAllCreateFunctionsHCurl()`
+- `void SetAllCreateFunctionsHDivPressure()`
+- `void SetAllCreateFunctions(TPZCompEl &cel)`
+- `void SetAllCreateFunctionsMultiphysicElem()`
+- `void SetAllCreateFunctionsSBFemMultiphysics()`
+- `void SetAllCreateFunctionsMultiphysicElemWithMem()`
+- `void SetAllCreateFunctionsContinuousWithMem()`
+- `void SetAllCreateFunctionsHCurlWithMem()`
+- `int Consolidate()`
+- `void GetEquationSetByMat(std::set<int64_t>& matidset, std::set<int64_t>& eqset)`
+- `void AddConnectEquationsToSet(TPZConnect& con, std::set<int64_t>& eqset)`
+- `int Check()`
+- `void LoadSolution(const TPZSolutionMatrix &sol)`
+- `template<class TVar> void UpdatePreviousState(TVar mult = 1.0)`
+- `void TransferMultiphysicsSolution()`
+- `void Divide(int64_t index,TPZVec<int64_t> &subindex,int interpolate = 0)`
+- `void Coarsen(TPZVec<int64_t> &elements, int64_t &index, bool CreateDiscontinuous = false)`
+- `void RemakeAllInterfaceElements()`
+- `void AdjustBoundaryElements()`
+- `void Permute(TPZVec<int64_t> &permute)`
+- `void SaddlePermute()`
+- `void SaddlePermute2()`
+- `TPZVec<STATE> Integrate(const std::string &varname, const std::set<int> &matids)`
+- `void EvaluateError(bool store_error, TPZVec<REAL> &errorSum, const std::set<int>& matset)`
+- `void EvaluateError(bool store_error, TPZVec<REAL> &errorSum)`
+- `TPZCompMesh * Clone() const`
+- `void CopyMaterials(TPZCompMesh &mesh) const`
+- `void DeleteMaterial(const int matId)`
+- `REAL DeltaX()`
+- `REAL MaximumRadiusOfMesh()`
+- `REAL LesserEdgeOfMesh()`
+- `TPZCompMesh *ComputeMesh(TPZVec<int64_t> &accumlist,int64_t numaggl)`
+- `void ComputeFillIn(int64_t resolution, TPZFMatrix<REAL> &fillin)`
+- `int ClassId() const override`
+- `void Write(TPZStream &buf, int withclassid) const override`
+- `void Read(TPZStream &buf, void *context) override`
+- `template <class TVar> static void ConnectSolution(int64_t cindex, TPZCompMesh *cmesh, TPZFMatrix<TVar> &glob, TPZVec<TVar> &sol)`

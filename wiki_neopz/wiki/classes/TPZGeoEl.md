@@ -1,0 +1,161 @@
+# TPZGeoEl — API card
+
+Generated from `Mesh/pzgeoel.h` — do not edit by hand.
+
+Include: `"pzgeoel.h"` (in C++ code: `#include "pzgeoel.h"`)
+
+Public methods (exact declarations from the header):
+- `TPZGeoEl * EldestAncestor() const`
+- `virtual void HDivDirectionsMaster(TPZFMatrix<REAL> &directions) = 0`
+- `virtual void HDivDirections(TPZVec<REAL> &pt, TPZFMatrix<REAL> &directions) = 0`
+- `virtual void HDivDirections(TPZVec<REAL> &pt, TPZFMatrix<Fad<REAL> > &directions) = 0`
+- `virtual void SetNeighbourInfo(int side, TPZGeoElSide &neigh, TPZTransform<REAL> &trans) = 0`
+- `int NumInterfaces()`
+- `int IncrementNumInterfaces()`
+- `int DecrementNumInterfaces()`
+- `virtual void GetPermutation(const int& i, TPZVec<int> &permutation) const = 0`
+- `virtual TPZIntPoints * CreateSideIntegrationRule(int side, int order) =0`
+- `void Shape1d(REAL x,int num,TPZFMatrix<REAL> &phi,TPZFMatrix<REAL> &dphi)`
+- `void ShapePhi1d(REAL x,int num,TPZFMatrix<REAL> &phi)`
+- `TPZGeoEl(int64_t id,int materialindex,TPZGeoMesh &mesh)`
+- `TPZGeoEl(int materialindex,TPZGeoMesh &mesh)`
+- `TPZGeoEl(int materialindex,TPZGeoMesh &mesh,int64_t &index)`
+- `TPZGeoEl(const TPZGeoEl &el)`
+- `TPZGeoEl(TPZGeoMesh & DestMesh, const TPZGeoEl &cp)`
+- `TPZGeoEl(TPZGeoMesh & DestMesh, const TPZGeoEl &cp, std::map<int64_t,int64_t> &org2clnMap)`
+- `TPZGeoEl() : TPZRegisterClassId(&TPZGeoEl::ClassId), fMesh(0), fId(-1), fMatId(0), fReference(NULL), fFatherIndex(-1), fIndex(-1), fNumInterfaces(0)`
+- `virtual void Initialize()`
+- `static int StaticClassId()`
+- `int ClassId() const override`
+- `void Read(TPZStream &str, void *context) override`
+- `void Write(TPZStream &str, int withclassid) const override`
+- `virtual TPZGeoEl * Clone(TPZGeoMesh &DestMesh) const = 0`
+- `void GetNodeIndices( TPZVec<int64_t> &nodeindices )`
+- `void GetNodeIndices( std::set<int64_t> &nodeindices )`
+- `virtual TPZGeoEl * ClonePatchEl(TPZGeoMesh &DestMesh, std::map<int64_t,int64_t> &gl2lcNdIdx, std::map<int64_t,int64_t> &gl2lcElIdx) const = 0`
+- `virtual ~TPZGeoEl()`
+- `void RemoveConnectivities()`
+- `TPZGeoMesh *Mesh() const`
+- `int64_t Id() const`
+- `virtual int NNodes() const = 0`
+- `virtual int NCornerNodes() const = 0`
+- `virtual int NPermutations() const = 0`
+- `TPZGeoNode* NodePtr(int i) const`
+- `TPZGeoNode& Node(int i) const`
+- `virtual int64_t NodeIndex(int i) const = 0`
+- `int MaterialId() const`
+- `TPZCompEl *Reference() const`
+- `virtual void GetHigherSubElements(TPZVec<TPZGeoEl*> &unrefinedSons)`
+- `virtual MElementType Type() const = 0`
+- `virtual MElementType Type(int side) const = 0`
+- `virtual std::string TypeName() const`
+- `virtual bool IsLinearMapping() const`
+- `virtual bool IsLinearMapping(int side) const = 0`
+- `virtual bool IsGeoBlendEl() const`
+- `virtual bool IsGeoElMapped() const`
+- `virtual int NSides() const = 0`
+- `virtual int NSideNodes(int side) const = 0`
+- `virtual int NSides(int dim) const = 0`
+- `virtual int FirstSide(int dim) const = 0`
+- `virtual TPZGeoNode *SideNodePtr(int side,int nodenum) const`
+- `virtual void MidSideNodeIndex(int side,int64_t &index) const = 0`
+- `virtual void MidSideNodeIndices(int side,TPZVec<int64_t> &indices) const`
+- `virtual int64_t SideNodeIndex(int side,int nodenum) const = 0`
+- `virtual int SideNodeLocIndex(int side, int nodenum) const = 0`
+- `virtual void HDivPermutation(int side, TPZVec<int> &permutegather)`
+- `virtual int SideIsUndefined(int side) = 0`
+- `virtual int NSubElements() const = 0`
+- `virtual int NSideSubElements(int side) const = 0`
+- `TPZGeoEl *Father() const`
+- `TPZGeoEl *LowestFather()`
+- `int64_t FatherIndex()`
+- `void BuildBlendConnectivity()`
+- `virtual bool ResetBlendConnectivity(const int64_t &side, const int64_t &index) = 0`
+- `void SetNeighbourForBlending(int side)`
+- `virtual TPZCompEl *CreateBCCompEl(int side, int bc, TPZCompMesh &cmesh)`
+- `virtual TPZGeoEl *CreateGeoElement(MElementType type, TPZVec<int64_t>& nodeindexes, int matid, int64_t& index) = 0`
+- `virtual TPZGeoEl *CreateBCGeoEl(int side, int bc) = 0`
+- `int WhichSide(TPZVec<int64_t> &SideNodeIds)`
+- `int NeighbourExists(int side,const TPZGeoElSide &gel)`
+- `void SetMaterialId(int id)`
+- `virtual void SetNodeIndex(int i,int64_t nodeindex) = 0`
+- `virtual void SetSideDefined(int side) = 0`
+- `virtual TPZGeoElSide Neighbour(int side) = 0`
+- `virtual int64_t NeighbourIndex(int side) const = 0`
+- `virtual void SetNeighbour(int side,const TPZGeoElSide &neighbour) = 0`
+- `virtual void Print(std::ostream & out = std::cout)`
+- `void PrintVTK(const std::string prefix="")`
+- `virtual void PrintTopologicalInfo(std::ostream & out = std::cout)`
+- `void SetReference(TPZCompEl *elp)`
+- `virtual void SetSubElement(int i, TPZGeoEl* gel) = 0`
+- `virtual void SetSubElementConnectivities()`
+- `void ResetReference()`
+- `virtual void Divide(TPZVec<TPZGeoEl *> &pv)`
+- `virtual void RandomPoint(TPZVec<REAL> &pt) = 0`
+- `virtual int HasSubElement() const = 0`
+- `virtual TPZTransform<REAL> SideToSideTransform(int sidefrom,int sideto)= 0`
+- `virtual void ProjectPoint(int sidefrom, TPZVec<REAL> &ptin, int sideto, TPZVec<REAL> &ptout)`
+- `TPZTransform<REAL> Projection(int side)`
+- `void SetIndex(int64_t index)`
+- `void SetId(int64_t elId)`
+- `virtual int GetFaceOrientation(int face) const = 0`
+- `int GetTransformId2dQ(TPZVec<int64_t> &idfrom,TPZVec<int64_t> &idto)`
+- `int GetTransformId2dT(TPZVec<int64_t> &idfrom,TPZVec<int64_t> &idto)`
+- `virtual TPZTransform<REAL> GetTransform(int side,int son) = 0`
+- `void SetFather(TPZGeoEl *father)`
+- `virtual void SetFatherIndex(int64_t fatherindex)`
+- `bool IsSibling(TPZGeoEl *gel)`
+- `virtual TPZGeoEl *SubElement(int is) const = 0`
+- `virtual void ResetSubElements()=0`
+- `int Level()`
+- `virtual int SideDimension(int side) const = 0`
+- `virtual int Dimension() const =0`
+- `virtual void AllHigherDimensionSides(int side,int targetdimension,TPZStack<TPZGeoElSide> &elsides) = 0`
+- `virtual void LowerDimensionSides(int side,TPZStack<int> &smallsides) const = 0`
+- `void Jacobian(TPZVec<REAL> &qsi,TPZFMatrix<REAL> &jac,TPZFMatrix<REAL> &axes,REAL &detjac,TPZFMatrix<REAL> &jacinv) const`
+- `void JacobianXYZ(TPZVec<REAL> &qsi,TPZFMatrix<REAL> &jac,TPZFMatrix<REAL> &axes,REAL &detjac,TPZFMatrix<REAL> &jacinv) const`
+- `static void Jacobian(const TPZFMatrix<REAL> &gradx, TPZFMatrix<REAL> &jac,TPZFMatrix<REAL> &axes,REAL &detjac,TPZFMatrix<REAL> &jacinv)`
+- `static void JacobianXYZ(const TPZFMatrix<REAL> &gradx, TPZFMatrix<REAL> &jac,TPZFMatrix<REAL> &axesXYZ,REAL &detjac,TPZFMatrix<REAL> &jacinv)`
+- `virtual void X(TPZVec<REAL> &qsi,TPZVec<REAL> &result) const = 0`
+- `virtual void GradX(TPZVec<REAL> &qsi, TPZFMatrix<REAL> &gradx) const = 0`
+- `virtual void X(TPZVec<Fad<REAL> > &qsi,TPZVec<Fad<REAL> > &result) const = 0`
+- `virtual void GradX(TPZVec<Fad<REAL> > &qsi, TPZFMatrix<Fad<REAL> > &gradx) const = 0`
+- `void ComputeQsiGrad(TPZVec<REAL> &qsi, TPZVec<Fad<REAL>> &qsifad)`
+- `static void ComputeDetjac(TPZFMatrix<Fad<REAL> > &gradx, Fad<REAL> &detjac)`
+- `static void ComputeDetjac(TPZFMatrix<REAL> &gradx, REAL &detjac)`
+- `int ElementExists(TPZGeoEl *elem,int64_t id)`
+- `virtual TPZGeoElSide Father2(int side) const`
+- `virtual int FatherSide(int side, int son)`
+- `virtual TPZTransform<REAL> BuildTransform2(int side, TPZGeoEl *father, TPZTransform<REAL> &t)`
+- `int WhichSide(TPZVec<REAL> &pt)`
+- `virtual void CenterPoint(int side, TPZVec<REAL> &masscent) const = 0`
+- `virtual void GetSubElements2(int side, TPZStack<TPZGeoElSide> &subel) const`
+- `virtual void GetAllSiblings(TPZStack<TPZGeoEl*> &unrefinedSons)`
+- `virtual void YoungestChildren(TPZStack<TPZGeoEl*> &unrefinedSons)`
+- `void GetSubElements2(int side, TPZStack<TPZGeoElSide> &subel, int dimension) const`
+- `int WhichSubel() const`
+- `void CheckSubelDataStructure()`
+- `void NodesCoordinates(TPZFMatrix<REAL > &cooridnates)`
+- `bool ComputeXInverse(TPZVec<REAL> &XD, TPZVec<REAL> &ksi, REAL Tol)`
+- `void TransformSonToFather(TPZGeoEl *ancestor, TPZVec<REAL> &ksiSon, TPZVec<REAL> &ksiAncestor)`
+- `TPZTransform<REAL> ComputeParamTrans(TPZGeoEl *fat,int fatside, int sideson)`
+- `REAL Volume()`
+- `virtual REAL RefElVolume() = 0`
+- `virtual REAL SideArea(int side)`
+- `static REAL QuadArea(TPZVec<TPZGeoNode *> &nodes)`
+- `static REAL TriangleArea(TPZVec<TPZGeoNode *> &nodes)`
+- `virtual REAL ElementRadius()`
+- `static REAL Distance(TPZVec<REAL> &centel,TPZVec<REAL> &centface)`
+- `virtual REAL CharacteristicSize()`
+- `virtual REAL SmallerEdge()`
+- `void ComputePermutationNormals(int side, TPZVec<int> &indexfrom)`
+- `int NormalOrientation(int side)`
+- `virtual bool IsRefPatternEl() const = 0`
+- `virtual void SetRefPattern(TPZAutoPointer<TPZRefPattern> )`
+- `virtual TPZAutoPointer<TPZRefPattern> GetRefPattern() const`
+- `bool VerifyNodeCoordinates(REAL tol = 1e-1)`
+- `virtual bool IsInParametricDomain(const TPZVec<REAL> &pt, REAL tol = 1.e-2) = 0`
+- `virtual int ProjectInParametricDomain(TPZVec<REAL> &qsi, TPZVec<REAL> &qsiInDomain) = 0`
+- `virtual int ProjectBissectionInParametricDomain(TPZVec<REAL> &qsi, TPZVec<REAL> &qsiInDomain) = 0`
+- `int64_t Index() const`
+- `static int GetVTK_ElType(TPZGeoEl *gel)`
