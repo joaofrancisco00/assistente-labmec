@@ -1195,6 +1195,33 @@ class TestPrefixCacheETelemetria(unittest.TestCase):
         for chave in ("recuperacao_s", "llm_s", "validacao_s", "compilacao_s", "execucao_s"):
             self.assertIn(chave, tempos)
 
+    def test_classe_inexistente_na_pergunta_avisada_na_primeira_tentativa(self):
+        llm = _LLMFalso("That requested class does not exist in NeoPZ; consider TPZGeoMesh instead.")
+        _gerar("How do I use TPZNavierStokes for cavity flow?", llm)
+        self.assertEqual(len(llm.prompts), 1)
+        self.assertIn("NON-EXISTENT CLASSES MENTIONED IN THE QUESTION", llm.prompts[0])
+        self.assertIn("TPZNavierStokes", llm.prompts[0])
+        self.assertNotIn("Rewrite the code using the correct names.", llm.prompts[0])
+
+    def test_fallback_api_nao_sobrescreve_ctx_llm(self):
+        class _LLMFalha429:
+            def stream(self, prompt):
+                raise RuntimeError("429 Resource Exhausted")
+
+        ctx = pipeline.PipelineContext(
+            llm=_LLMFalha429(), headers_db=MockDB(), examples_db=MockDB(), wiki_db=None,
+            whitelist={"TPZGeoMesh"}, headers_whitelist={"pzgmesh.h"},
+            methods_whitelist=set(), class_header_index={}, class_methods_index={},
+            collisions={}, renames={}, legacy_classes=set(), system_base="system",
+        )
+        llm_original = ctx.llm
+        fallback_llm = _LLMFalso("Resposta local.")
+        with patch.object(pipeline, "OllamaLLM", return_value=fallback_llm), \
+             redirect_stdout(io.StringIO()):
+            r = pipeline.gerar_codigo("What is TPZGeoMesh?", ctx)
+        self.assertEqual(r["resposta"], "Resposta local.")
+        self.assertIs(ctx.llm, llm_original)
+
 
 class TestCorrecaoCaseIncludeEPadroesAPI(unittest.TestCase):
     def test_include_case_insensitive_corrigido(self):

@@ -568,8 +568,6 @@ def gerar_codigo(
                     print(f"  ⚠️  API do Google indisponível ou limite atingido. Acionando o Ollama local ({OLLAMA_MODEL}) imediatamente...")
                     if OllamaLLM is not None:
                         llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
-                        if ctx is not None:
-                            ctx.llm = llm  # persiste o fallback p/ as próximas chamadas
                     continue
                 raise
         llm_cache.salvar(llm, prompt_txt, resposta)

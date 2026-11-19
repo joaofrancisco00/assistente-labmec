@@ -2,6 +2,7 @@ import difflib
 from pathlib import Path
 
 from .correction import _sugerir_correcoes
+from .cpp_parser import find_tpz_classes_in_code
 from .validation import _descrever_enum_invalido
 
 def _formatar_contexto(h_docs: list, e_docs: list, w_docs: list = None) -> str:
@@ -233,6 +234,22 @@ def _montar_prompt(
         partes_extra.append("=== END OF ADDITIONAL DECLARATIONS ===")
         bloco_extra = "\n\n---\n\n".join(partes_extra)
 
+    aviso_pergunta = ""
+    universo_classes = (whitelist or set()) | (destinos or set())
+    if pergunta and universo_classes:
+        inexistentes_pergunta = sorted(
+            c for c in find_tpz_classes_in_code(pergunta)
+            if c not in universo_classes and c not in (renames or {})
+        )
+        if inexistentes_pergunta:
+            lista_inex = ", ".join(inexistentes_pergunta)
+            aviso_pergunta = (
+                f"\n\n⚠️ NON-EXISTENT CLASSES MENTIONED IN THE QUESTION:\n"
+                f"  - The class(es) {lista_inex} mentioned in the user's question DO NOT EXIST in NeoPZ.\n"
+                f"  - Do NOT write code using {lista_inex} and do NOT invent headers for them.\n"
+                f"  - Explain clearly that {lista_inex} does not exist in NeoPZ and suggest/use real NeoPZ classes from the context."
+            )
+
     return f"""{system_base}
 
 FUNDAMENTAL RULE: NEVER invent TPZ class names or header names.
@@ -268,7 +285,7 @@ INSTRUCTIONS:
   that an example was verified, that applies to THAT example, not to yours
 - Always answer in English
 
-{contexto}{_formatar_historico(historico)}{bloco_extra}{instrucao_correcao}
+{contexto}{_formatar_historico(historico)}{bloco_extra}{aviso_pergunta}{instrucao_correcao}
 
 Task: {pergunta}
 
