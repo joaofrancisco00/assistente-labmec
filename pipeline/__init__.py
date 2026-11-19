@@ -36,6 +36,8 @@ from .config import (
     NEOPZ_CXX,
     TIMEOUT_COMPILACAO,
     MAX_ERROS_RELATADOS,
+    HYBRID_RECIPE_MIN_SCORE,
+    ChatOllama,
     OllamaLLM,
     HuggingFaceEmbeddings,
     Chroma,
@@ -146,6 +148,54 @@ from .cpp_parser import (
 
 from .health_check import run_health_check
 from .context import PipelineContext
+
+
+_MODELOS_LOCAIS = ("ChatOllama", "OllamaLLM", "Ollama")
+_CHAT_MODELS = ("ChatOllama", "ChatGoogleGenerativeAI")
+
+
+def _eh_modelo_local(llm) -> bool:
+    return type(llm).__name__ in _MODELOS_LOCAIS
+
+
+def _criar_llm_local():
+    if ChatOllama is not None:
+        return ChatOllama(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
+    if OllamaLLM is not None:
+        return OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
+    return None
+
+
+def _payload_llm(llm, prompt_txt: str, system_base: str):
+    if type(llm).__name__ in _CHAT_MODELS and system_base and prompt_txt.startswith(system_base):
+        user_txt = prompt_txt[len(system_base):].lstrip("\n")
+        return [("system", system_base), ("human", user_txt)]
+    return prompt_txt
+
+
+def _roteamento_hibrido_ativo() -> bool:
+    return os.environ.get("ROTEAMENTO_HIBRIDO", "1") != "0"
+
+
+def _tem_receita_forte(w_docs: list, min_score: float = HYBRID_RECIPE_MIN_SCORE) -> bool:
+    return any(
+        d.metadata.get("tipo") == "doc_fluxo"
+        and d.metadata.get("rerank_score", 0.0) >= min_score
+        for d in (w_docs or [])
+    )
+
+
+def _selecionar_llm_tentativa(llm_principal, tentativa: int, explicativa: bool, w_docs: list):
+    if (tentativa == 1
+            and type(llm_principal).__name__ == "ChatGoogleGenerativeAI"
+            and _roteamento_hibrido_ativo()
+            and (explicativa or _tem_receita_forte(w_docs))):
+        local = _criar_llm_local()
+        if local is not None:
+            print(f"  🔀 Roteamento híbrido: usando modelo local ({OLLAMA_MODEL}) na Tentativa 1 "
+                  "(pergunta explicativa ou receita forte — poupando cota do Gemini)")
+            return local, True
+    return llm_principal, False
 
 
 def _registrar_interacao(pergunta: str, resultado: dict, caminho: Path = LOG_INTERACOES_FILE):
@@ -503,19 +553,25 @@ def gerar_codigo(
         sufixo_cls = f" ({' '.join(classes_ant)})" if classes_ant else ""
         consulta = f"{perg_ant}{sufixo_cls}\n{pergunta}"
     t0_rec = time.monotonic()
+    eh_explicativa = _pergunta_e_explicativa(pergunta)
     h_docs, e_docs, w_docs, fontes = _recuperar_contexto(
         consulta, headers_db, examples_db, wiki_db,
-        explicativa=_pergunta_e_explicativa(pergunta),
+        explicativa=eh_explicativa,
     )
     t_recuperacao = round(time.monotonic() - t0_rec, 3)
 
     contexto = _formatar_contexto(h_docs, e_docs, w_docs)
     classes_contexto_fixo = _classes_do_contexto(h_docs, e_docs, w_docs)
     extras_acumulados = []
+    llm_principal = llm
 
     for tentativa in range(1, MAX_RETRIES + 2):
         print(f"  [Tentativa {tentativa}] Gerando resposta...")
         _emitir(on_evento, "tentativa", str(tentativa))
+
+        llm, roteado_local = _selecionar_llm_tentativa(
+            llm_principal, tentativa, eh_explicativa, w_docs
+        )
 
         prompt_txt = _montar_prompt(
             pergunta, contexto, system_base, whitelist, headers_whitelist,
@@ -535,7 +591,7 @@ def gerar_codigo(
         )
 
         tokens_estimados = len(prompt_txt) // 4
-        if type(llm).__name__ == "OllamaLLM" and tokens_estimados > int(NUM_CTX * 0.9):
+        if _eh_modelo_local(llm) and tokens_estimados > int(NUM_CTX * 0.9):
             print(f"  ⚠️  Prompt grande (~{tokens_estimados} tokens, NUM_CTX={NUM_CTX}) — risco de truncamento")
 
         t0_llm = time.monotonic()
@@ -547,9 +603,10 @@ def gerar_codigo(
         for _api_try in range(1, _MAX_RETRIES_API + 1):
             if resposta is not None:
                 break
+            payload = _payload_llm(llm, prompt_txt, system_base)
             try:
                 pedacos = []
-                for pedaco in llm.stream(prompt_txt):
+                for pedaco in llm.stream(payload):
                     texto = pedaco.content if hasattr(pedaco, "content") else pedaco
                     if isinstance(texto, list):
                         texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
@@ -559,7 +616,7 @@ def gerar_codigo(
                 resposta = "".join(pedacos)
                 break
             except (AttributeError, NotImplementedError):
-                ret = llm.invoke(prompt_txt)
+                ret = llm.invoke(payload)
                 texto = ret.content if hasattr(ret, "content") else ret
                 if isinstance(texto, list):
                     texto = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in texto)
@@ -567,10 +624,16 @@ def gerar_codigo(
                 break
             except Exception as e:
                 erro_str = str(e)
+                if roteado_local and _api_try < _MAX_RETRIES_API:
+                    print(f"  ⚠️  Ollama local indisponível no roteamento híbrido ({e}). Acionando Gemini...")
+                    llm = llm_principal
+                    roteado_local = False
+                    continue
                 if ("503" in erro_str or "429" in erro_str) and _api_try < _MAX_RETRIES_API:
                     print(f"  ⚠️  API do Google indisponível ou limite atingido. Acionando o Ollama local ({OLLAMA_MODEL}) imediatamente...")
-                    if OllamaLLM is not None:
-                        llm = OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
+                    local = _criar_llm_local()
+                    if local is not None:
+                        llm = local
                     continue
                 raise
         llm_cache.salvar(llm, prompt_txt, resposta)
@@ -628,7 +691,7 @@ def gerar_codigo(
             print("  ⚠️  Limite de tentativas atingido.")
             break
 
-        if type(llm).__name__ != "OllamaLLM":
+        if not _eh_modelo_local(llm):
             print("  ⏳ Aguardando 3s antes de tentar novamente para poupar a API...")
             time.sleep(3)
 
@@ -684,11 +747,12 @@ def obter_llm():
         print(f"  ☁️  Usando Gemini ({GEMINI_MODEL}) via API...")
         return ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=TEMPERATURE, max_retries=0)
     else:
-        if OllamaLLM is None:
+        local = _criar_llm_local()
+        if local is None:
             print("Erro: Nem o pacote do Gemini nem o do Ollama foram encontrados.")
             exit(1)
-        print(f"  💻 Usando modelo local ({OLLAMA_MODEL}) via Ollama...")
-        return OllamaLLM(model=OLLAMA_MODEL, temperature=TEMPERATURE, num_ctx=NUM_CTX, keep_alive=-1)
+        print(f"  💻 Usando modelo local ({OLLAMA_MODEL}) via Ollama ({type(local).__name__})...")
+        return local
 
 
 def main():

@@ -1268,11 +1268,108 @@ class TestPrefixCacheETelemetria(unittest.TestCase):
         )
         llm_original = ctx.llm
         fallback_llm = _LLMFalso("Resposta local.")
-        with patch.object(pipeline, "OllamaLLM", return_value=fallback_llm), \
+        with patch.object(pipeline, "ChatOllama", return_value=fallback_llm), \
              redirect_stdout(io.StringIO()):
             r = pipeline.gerar_codigo("What is TPZGeoMesh?", ctx)
         self.assertEqual(r["resposta"], "Resposta local.")
         self.assertIs(ctx.llm, llm_original)
+
+
+class TestChatOllamaERoteamentoHibrido(unittest.TestCase):
+    def test_chat_ollama_recebe_mensagens_system_e_human_sem_dormir(self):
+        ChatOllamaFalso = type("ChatOllama", (_LLMFalso,), {})
+        llm = ChatOllamaFalso(_CODIGO_INVALIDO, "Resposta final sem código.")
+        with patch("pipeline.time.sleep") as dormir, redirect_stdout(io.StringIO()):
+            r = _gerar("solve a problem", llm)
+        dormir.assert_not_called()
+        self.assertEqual(r["tentativas"], 2)
+        self.assertIsInstance(llm.prompts[0], list)
+        self.assertEqual(llm.prompts[0][0], ("system", "system"))
+        self.assertEqual(llm.prompts[0][1][0], "human")
+        self.assertIn("Task: solve a problem", llm.prompts[0][1][1])
+
+    def test_roteamento_hibrido_usa_local_na_t1_e_escalona_para_gemini_na_t2(self):
+        from langchain_core.documents import Document
+
+        GeminiFalso = type("ChatGoogleGenerativeAI", (_LLMFalso,), {})
+        LocalFalso = type("ChatOllama", (_LLMFalso,), {})
+        gemini = GeminiFalso("Resposta final do Gemini.")
+        local = LocalFalso(_CODIGO_INVALIDO)
+        receita = Document(
+            page_content="# Flow recipe",
+            metadata={"tipo": "doc_fluxo", "rerank_score": 4.5, "source": "wiki/flows/p.md"},
+        )
+        with patch.object(pipeline, "_criar_llm_local", return_value=local), \
+             patch.object(pipeline, "_recuperar_contexto", return_value=([], [], [receita], set())), \
+             patch("pipeline.time.sleep"), \
+             redirect_stdout(io.StringIO()):
+            r = pipeline.gerar_codigo(
+                "Solve 2D Poisson",
+                llm=gemini, headers_db=MockDB(), examples_db=MockDB(),
+                whitelist={"TPZGeoMesh"}, headers_whitelist={"pzgmesh.h"},
+                system_base="system",
+            )
+        self.assertEqual(len(local.prompts), 1)
+        self.assertEqual(len(gemini.prompts), 1)
+        self.assertEqual(r["resposta"], "Resposta final do Gemini.")
+        self.assertEqual(r["tentativas"], 2)
+
+    def test_roteamento_hibrido_vai_direto_ao_gemini_sem_receita_forte(self):
+        GeminiFalso = type("ChatGoogleGenerativeAI", (_LLMFalso,), {})
+        LocalFalso = type("ChatOllama", (_LLMFalso,), {})
+        gemini = GeminiFalso("Resposta direta do Gemini.")
+        local = LocalFalso("Resposta local.")
+        with patch.object(pipeline, "_criar_llm_local", return_value=local), \
+             patch.object(pipeline, "_recuperar_contexto", return_value=([], [], [], set())), \
+             redirect_stdout(io.StringIO()):
+            r = pipeline.gerar_codigo(
+                "Write complete code for 1D Poisson",
+                llm=gemini, headers_db=MockDB(), examples_db=MockDB(),
+                whitelist={"TPZGeoMesh"}, headers_whitelist={"pzgmesh.h"},
+                system_base="system",
+            )
+        self.assertEqual(local.prompts, [])
+        self.assertEqual(len(gemini.prompts), 1)
+        self.assertEqual(r["resposta"], "Resposta direta do Gemini.")
+
+    def test_roteamento_hibrido_cai_para_gemini_se_ollama_estiver_offline(self):
+        class _LocalOffline:
+            def stream(self, payload):
+                raise ConnectionError("Ollama offline")
+
+        GeminiFalso = type("ChatGoogleGenerativeAI", (_LLMFalso,), {})
+        gemini = GeminiFalso("Resposta via Gemini fallback.")
+        with patch.object(pipeline, "_criar_llm_local", return_value=_LocalOffline()), \
+             patch.object(pipeline, "_recuperar_contexto", return_value=([], [], [], set())), \
+             redirect_stdout(io.StringIO()):
+            r = pipeline.gerar_codigo(
+                "What is TPZGeoMesh?",
+                llm=gemini, headers_db=MockDB(), examples_db=MockDB(),
+                whitelist={"TPZGeoMesh"}, headers_whitelist={"pzgmesh.h"},
+                system_base="system",
+            )
+        self.assertEqual(r["resposta"], "Resposta via Gemini fallback.")
+        self.assertEqual(len(gemini.prompts), 1)
+
+    def test_roteamento_hibrido_desligado_por_env_var(self):
+        import os
+
+        GeminiFalso = type("ChatGoogleGenerativeAI", (_LLMFalso,), {})
+        LocalFalso = type("ChatOllama", (_LLMFalso,), {})
+        gemini = GeminiFalso("Resposta 100% Gemini.")
+        local = LocalFalso("Local nao chamado.")
+        with patch.dict(os.environ, {"ROTEAMENTO_HIBRIDO": "0"}), \
+             patch.object(pipeline, "_criar_llm_local", return_value=local), \
+             patch.object(pipeline, "_recuperar_contexto", return_value=([], [], [], set())), \
+             redirect_stdout(io.StringIO()):
+            r = pipeline.gerar_codigo(
+                "What is TPZGeoMesh?",
+                llm=gemini, headers_db=MockDB(), examples_db=MockDB(),
+                whitelist={"TPZGeoMesh"}, headers_whitelist={"pzgmesh.h"},
+                system_base="system",
+            )
+        self.assertEqual(local.prompts, [])
+        self.assertEqual(r["resposta"], "Resposta 100% Gemini.")
 
 
 class TestCorrecaoCaseIncludeEPadroesAPI(unittest.TestCase):

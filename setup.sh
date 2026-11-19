@@ -36,6 +36,11 @@ if ! ollama list | grep -q "qwen2.5-coder:7b"; then
     echo "→ Baixando o modelo qwen2.5-coder:7b (~4.7 GB, só na primeira vez)..."
     ollama pull qwen2.5-coder:7b
 fi
+if command -v launchctl >/dev/null 2>&1; then
+    launchctl setenv OLLAMA_FLASH_ATTENTION 1
+    launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0
+    echo "✅ Ollama otimizado no macOS (OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0)"
+fi
 echo "✅ Ollama OK (qwen2.5-coder:7b disponível)"
 
 # ── Submodule do NeoPZ ────────────────────────────────────────────────────────

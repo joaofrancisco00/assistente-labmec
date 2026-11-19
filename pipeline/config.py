@@ -6,6 +6,14 @@ except ImportError:
     ChatGoogleGenerativeAI = None
 
 try:
+    from langchain_ollama import ChatOllama
+except ImportError:
+    try:
+        from langchain_community.chat_models import ChatOllama
+    except ImportError:
+        ChatOllama = None
+
+try:
     from langchain_ollama import OllamaLLM
 except ImportError:
     try:
@@ -96,6 +104,7 @@ K_WIKI_CONCEITOS = 1
 RERANK_MIN_HEADERS  = -2.0
 RERANK_MIN_EXAMPLES = 1.0
 RERANK_MIN_WIKI     = -5.0
+HYBRID_RECIPE_MIN_SCORE = 3.0
 
 INCLUDES_LIXO_CONHECIDOS = {"neopz.h", "pz.h", "pzc.h"}
 
