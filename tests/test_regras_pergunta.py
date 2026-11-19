@@ -169,6 +169,44 @@ class TestPedidoDarcyH1(unittest.TestCase):
         self.assertFalse(any("H1 space" in a for a in avisos), avisos)
 
 
+class TestPedido1D(unittest.TestCase):
+    PEDIDO = "Como resolvo um problema de Poisson 1D no intervalo [0,1] com NeoPZ?"
+
+    def test_creategeomeshongrid_em_pedido_1d_e_reprovado(self):
+        codigo = "```cpp\nauto *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(1, minX, maxX, matIds, nDivs, MMeshType::EOned, true);\n```"
+        avisos = _avisos(codigo, self.PEDIDO)
+        self.assertTrue(any("CreateGeoMeshOnGrid" in a for a in avisos), avisos)
+
+    def test_malha_manual_1d_passa(self):
+        codigo = "```cpp\nint64_t elIdx = -1;\ngmesh->CreateGeoElement(EOned, nodeIndices, 1, elIdx);\n```"
+        self.assertEqual(_avisos(codigo, self.PEDIDO), [])
+
+    def test_pedido_2d_nao_dispara(self):
+        codigo = "```cpp\nauto *gmesh = TPZGeoMeshTools::CreateGeoMeshOnGrid(2, minX, maxX, matIds, nDivs, MMeshType::EQuadrilateral, true);\n```"
+        self.assertEqual(_avisos(codigo, "Solve a 2D Poisson problem"), [])
+
+
+class TestBCDuplicada(unittest.TestCase):
+    def test_createbc_com_mesmo_id_e_reprovado(self):
+        codigo = (
+            "```cpp\n"
+            "auto *bc1 = mat->CreateBC(mat, EBC, 0, val1, val2);\n"
+            "auto *bc2 = mat->CreateBC(mat, EBC, 1, val1, val2);\n"
+            "```\n"
+        )
+        avisos = _avisos(codigo, None)
+        self.assertTrue(any("distinct material ID" in a for a in avisos), avisos)
+
+    def test_createbc_com_ids_distintos_passa(self):
+        codigo = (
+            "```cpp\n"
+            "auto *bc1 = mat->CreateBC(mat, EBCLeft, 0, val1, val2);\n"
+            "auto *bc2 = mat->CreateBC(mat, EBCRight, 1, val1, val2);\n"
+            "```\n"
+        )
+        self.assertEqual(_avisos(codigo, None), [])
+
+
 class TestPedidoNoLoop(unittest.TestCase):
     def test_retry_recebe_a_divergencia_com_o_pedido(self):
         llm = _LLMFalso(CODIGO_CONTINUO, CODIGO_HDIV)

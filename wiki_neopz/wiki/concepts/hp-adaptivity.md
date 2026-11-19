@@ -20,4 +20,31 @@ tags:
 
 **Reference anchors.** Devloo–Oden hp work; Szabó–Babuška; Demkowicz.
 
+## Canonical API for p-Refinement (Changing Polynomial Order)
+
+- Before `cmesh->AutoBuild()`: set the initial polynomial order with `cmesh->SetDefaultOrder(pOrder);`.
+- To increase the polynomial order of already created elements (`p`-refinement) and solve again:
+
+```cpp
+#include "pzinterpolationspace.h" // TPZInterpolationSpace
+#include "pzskylstrmatrix.h"      // TPZSkylineStructMatrix
+#include "TPZLinearAnalysis.h"    // TPZLinearAnalysis
+
+const int64_t nEl = cmesh->NElements();
+for (int64_t i = 0; i < nEl; ++i) {
+    TPZCompEl *cel = cmesh->Element(i);
+    if (!cel) continue;
+    auto *intel = dynamic_cast<TPZInterpolationSpace *>(cel);
+    if (intel) {
+        intel->PRefine(newOrder);
+    }
+}
+cmesh->ExpandSolution();
+cmesh->InitializeBlock();
+
+// Re-configure structural matrix and solver on TPZLinearAnalysis before Assemble/Solve:
+TPZSkylineStructMatrix<STATE> strMatrix(cmesh);
+an.SetStructuralMatrix(strMatrix);
+```
+
 Related: [[refinement-hanging-nodes]] · [[error-estimation-convergence]] · [[shape-functions]]

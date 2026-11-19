@@ -39,3 +39,30 @@ int main() {
     return 0;
 }
 ```
+
+### Non-constant (position-dependent) boundary conditions
+
+To impose a boundary value that depends on spatial coordinates (e.g. $u(x, y) = x \cdot y$), call `SetForcingFunctionBC(bcFunc, pOrder)` on the `TPZBndCondT<STATE> *` returned by `CreateBC`.
+
+Important: unlike `TPZMatPoisson::SetForcingFunction` (which takes 2 arguments), `SetForcingFunctionBC` requires a **3-argument lambda** `(const TPZVec<REAL> &loc, TPZVec<STATE> &val, TPZFMatrix<STATE> &deriv)`:
+
+```cpp
+#include "TPZBndCondT.h"
+#include "Poisson/TPZMatPoisson.h"
+#include "pzmanvector.h"
+#include "pzfmatrix.h"
+
+TPZFMatrix<STATE> val1(1, 1, 0.0);
+TPZManVector<STATE, 1> val2(1, 0.0);
+TPZBndCondT<STATE> *bnd = material->CreateBC(material, bc_id, /*type=Dirichlet*/ 0, val1, val2);
+
+auto bcFunc = [](const TPZVec<REAL> &loc, TPZVec<STATE> &val, TPZFMatrix<STATE> &deriv) {
+    val[0] = loc[0] * loc[1]; // u(x, y) = x * y
+};
+bnd->SetForcingFunctionBC(bcFunc, pOrder);
+cmesh->InsertMaterialObject(bnd);
+```
+
+### Multiple boundary conditions on different sides
+
+Every boundary condition inserted with `cmesh->InsertMaterialObject(...)` **must have a unique material ID** (inserting two BCs with the same ID aborts at runtime in `TPZCompMesh::InsertMaterialObject` with `DebugStop`). When using `TPZGeoMeshTools::CreateGeoMeshOnGrid` in 2D with `createBoundEls = true`, pass 5 IDs in `matIds = {EDomain, EBCBottom, EBCRight, EBCTop, EBCLeft}` and call `CreateBC` once per distinct boundary ID.

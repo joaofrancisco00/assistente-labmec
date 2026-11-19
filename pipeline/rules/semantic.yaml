@@ -70,3 +70,16 @@ rules:
     requer: null
     incompativel_com: '\bTPZHybridDarcyFlow\b|\bTPZMixedDarcyFlow\b'
     aviso: "The request is for Darcy in the H1 space: use TPZDarcyFlow (include \"DarcyFlow/TPZDarcyFlow.h\") on a single continuous mesh. TPZHybridDarcyFlow and TPZMixedDarcyFlow are for combined/mixed spaces."
+
+  - nome: "Request for 1D - no CreateGeoMeshOnGrid"
+    pergunta: '(?i)\b1\s*-?\s*d\b|one[- ]dimensional|unidimensional'
+    padrao: null
+    requer: null
+    incompativel_com: '\bCreateGeoMeshOnGrid\b'
+    aviso: "TPZGeoMeshTools::CreateGeoMeshOnGrid only supports 2D and 3D meshes and aborts at runtime (DebugStop: Invalid dim) when dim = 1. For a 1D mesh, allocate nodes manually in TPZGeoMesh (NodeVec().AllocateNewElement() + Initialize) and create 1D elements with gmesh->CreateGeoElement(EOned, nodeIndices, matId, elIndex), plus EPoint boundary elements at the endpoints."
+
+  - nome: "Duplicate Boundary Material ID in CreateBC"
+    padrao: '\bCreateBC\b'
+    requer: null
+    incompativel_com: 'CreateBC\s*\(\s*\w+\s*,\s*(-?\w+)\s*,[\s\S]*?\bCreateBC\s*\(\s*\w+\s*,\s*\1\s*,'
+    aviso: "Each boundary condition inserted into TPZCompMesh MUST have a distinct material ID (e.g. EBCLeft = -1, EBCRight = -2, or EBCBottom/EBCRight/EBCTop/EBCLeft in matIds). Calling CreateBC twice with the same boundary material ID causes TPZCompMesh::InsertMaterialObject to abort at runtime (DebugStop: 'inserting material with matid which already exists')."
