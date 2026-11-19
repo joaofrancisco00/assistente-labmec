@@ -368,6 +368,20 @@ class TestVariaveisAmbiguas(unittest.TestCase):
         _, aridade = self._chamadas(codigo)
         self.assertEqual(aridade, [])
 
+    def test_variavel_ambigua_no_arquivo_mas_unica_na_funcao_e_validada_pelo_escopo_local(self):
+        codigo = (
+            "void CreateFluxMesh(TPZGeoMesh *gmesh) {\n"
+            "    auto *cmesh = new TPZCompMesh(gmesh);\n"
+            "    cmesh->BuildMultiphysicsSpace(active, meshes);\n"
+            "}\n"
+            "void CreateMulti(TPZGeoMesh *gmesh) {\n"
+            "    auto *cmesh = new TPZMultiphysicsCompMesh(gmesh);\n"
+            "    cmesh->BuildMultiphysicsSpace(active, meshes);\n"
+            "}\n"
+        )
+        suspeitos_nome, _ = self._chamadas(codigo)
+        self.assertEqual(suspeitos_nome, [("TPZCompMesh", "BuildMultiphysicsSpace")])
+
 
 class TestClassesEmComentarios(unittest.TestCase):
     def test_classe_em_comentario_nao_conta(self):

@@ -908,6 +908,49 @@ def _bind_variables_to_classes(code: str) -> dict:
     return bindings
 
 
+def _enclosing_function_body(code: str, pos: int):
+    """Retorna o cabeçalho + corpo `{ ... }` do bloco de nível topo que contém
+    `pos`, ou None se `pos` estiver fora de qualquer bloco."""
+    i = 0
+    n = len(code)
+    in_line_comment = False
+    in_block_comment = False
+    in_string = False
+    inicio_decl = 0
+
+    while i < n:
+        c = code[i]
+        nc = code[i + 1] if i + 1 < n else ''
+        if in_line_comment:
+            if c == '\n':
+                in_line_comment = False
+        elif in_block_comment:
+            if c == '*' and nc == '/':
+                in_block_comment = False
+                i += 1
+        elif in_string:
+            if c == '"' and (i == 0 or code[i - 1] != '\\'):
+                in_string = False
+        elif c == '/' and nc == '/':
+            in_line_comment = True
+        elif c == '/' and nc == '*':
+            in_block_comment = True
+        elif c == '"':
+            in_string = True
+        elif c == ';':
+            inicio_decl = i + 1
+        elif c == '{':
+            if i > pos:
+                return None
+            fecha = _find_matching_brace(code, i)
+            if i <= pos <= fecha:
+                return code[inicio_decl:fecha + 1]
+            i = fecha
+            inicio_decl = fecha + 1
+        i += 1
+    return None
+
+
 def _count_call_args(code: str, open_pos: int) -> int:
     """Conta os argumentos de uma chamada de método a partir da posição do '('."""
     close_pos = _scan_matching_paren(code, open_pos)
@@ -1092,6 +1135,12 @@ def find_suspicious_method_calls(code: str, method_whitelist: set, class_whiteli
         # válido) ou chamada cujo "método" é na verdade o nome da classe
         if any(method in (cls, f"~{cls}") for cls in classes):
             continue
+        if len(classes) > 1:
+            corpo_local = _enclosing_function_body(code, m.start())
+            if corpo_local:
+                locais = _bind_variables_to_classes(corpo_local).get(var)
+                if locais:
+                    classes = locais
         if len(classes) == 1:
             _registrar(_checar(classes[0], method, open_pos))
             continue
