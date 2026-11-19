@@ -417,6 +417,10 @@ class TestChunkingExemplosCpp(unittest.TestCase):
         ok2, _ = filter_cpp_example_chunk(so_ctors)
         self.assertFalse(ok2)
 
+        curto = "TPZGeoMesh *g = new TPZGeoMesh();"
+        ok_curto, _ = filter_cpp_example_chunk(curto)
+        self.assertFalse(ok_curto)
+
         util = "void Run() {\n    TPZGeoMesh *g = new TPZGeoMesh();\n    g->SetDimension(2);\n}\n"
         ok3, classes = filter_cpp_example_chunk(util)
         self.assertTrue(ok3)

@@ -624,8 +624,10 @@ def reattach_orphan_signatures(chunks: list[str]) -> list[str]:
             continue
         # Remove a assinatura órfã sem corpo do final do chunk i (se sobrar conteúdo útil antes)
         prefixo = chunk[:ult_delim + 1].rstrip()
-        if prefixo:
+        if prefixo and len(re.sub(r'[\s{};/]+', '', prefixo)) >= 5:
             out[i] = prefixo
+        elif prefixo:
+            out[i] = ""
         # Se o próximo chunk começa com '{' ou lista de inicialização ': Base(...)',
         # garante que a assinatura esteja presente no início do próximo chunk
         if i + 1 < len(out):
@@ -638,6 +640,9 @@ def reattach_orphan_signatures(chunks: list[str]) -> list[str]:
 def filter_cpp_example_chunk(chunk: str) -> tuple[bool, str]:
     """Avalia se um chunk de .cpp deve ser indexado em neopz_examples.
     Retorna (aprovado, classes_usadas_csv)."""
+    if len(chunk.strip()) < 50:
+        return False, ""
+
     if ("This file is part of the PZ environment" in chunk
             or "Universidade Estadual de Campinas" in chunk):
         if len(chunk.strip()) < 1000:

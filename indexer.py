@@ -139,6 +139,9 @@ def _indexar_headers(embeddings, chunks_por_arquivo: dict):
                     linhas_uteis = [l for l in raw.splitlines() if l.strip() and not l.strip().startswith('#include') and not l.strip().startswith('#pragma')]
                     if len('\n'.join(linhas_uteis).strip()) < 50:
                         continue
+                    # Evita chunks de header sem definicao de classe/struct (alertados pelo health_check)
+                    if "class " not in raw and "struct " not in raw:
+                        continue
                         
                     documents.append(Document(
                         page_content=raw[:2000],
