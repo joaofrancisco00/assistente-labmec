@@ -37,7 +37,7 @@ def _sem_receita_colada(resposta: str) -> bool:
     aceitável (até desejável); o que não pode é a receita inteira — detectada
     pela impressão digital do pipeline completo (2+ marcadores juntos).
     """
-    marcadores = ("CreateGeoMeshOnGrid", "DefineGraphMesh", "SetForcingFunction")
+    marcadores = ("CreateGeoMeshOnGrid", "InsertMaterialObject", "vtk.Do()")
     return sum(m in resposta for m in marcadores) < 2
 
 

@@ -452,28 +452,168 @@ CASOS = [
     },
 ]
 
+# Casos de generalizacao derivados das sondagens fora do benchmark padrao
+# (logs/sondagem_20261023_190939.json) — selecionaveis via `--grupo sondagem`
+# ou diretamente por `--casos <nome>`.
+CASOS_SONDAGEM = [
+    {
+        "nome": "sondagem_elast_poisson_ratio",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Write a complete NeoPZ program for 2D plane stress elasticity of a "
+                     "unit square plate with Young's modulus 210e9 and Poisson's ratio 0.3, "
+                     "clamped on the left edge and pulled on the right edge."),
+        "checks": {
+            "validacao_limpa":      lambda r: r["valido"],
+            "usa_elasticidade_2d":  lambda r: "TPZElasticity2D" in r["resposta"],
+            "sem_poisson_material": lambda r: "TPZMatPoisson" not in r["resposta"],
+            "compilou":             _compilou,
+        },
+    },
+    {
+        "nome": "sondagem_erro_l2_exato",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Write a complete NeoPZ program that solves Poisson on the unit square "
+                     "with the exact solution u = sin(pi x) sin(pi y), and computes the L2 "
+                     "and H1 errors of the numerical solution for polynomial orders 1 to 3."),
+        "checks": {
+            "validacao_limpa":       lambda r: r["valido"],
+            "usa_postprocess_error": lambda r: "PostProcessError" in r["resposta"],
+            "compilou":              _compilou,
+        },
+    },
+    {
+        "nome": "sondagem_cg_iterativo",
+        "receita": False,
+        "pergunta": ("Show a snippet that configures a TPZLinearAnalysis to use the conjugate "
+                     "gradient iterative solver with a Jacobi preconditioner instead of a "
+                     "direct solver."),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "usa_set_cg":      lambda r: "SetCG" in r["resposta"],
+            "e_snippet":       lambda r: _sem_main(r["resposta"]),
+        },
+    },
+    {
+        "nome": "sondagem_vtk_geomesh",
+        "receita": False,
+        "pergunta": ("How can I export only the geometric mesh (TPZGeoMesh) to a VTK file "
+                     "to inspect it in Paraview?"),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "usa_vtk_geomesh": lambda r: "TPZVTKGeoMesh" in r["resposta"],
+        },
+    },
+    {
+        "nome": "sondagem_hcurl",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Write C++ code with NeoPZ that creates a computational mesh with an "
+                     "H(curl) approximation space on a 2D triangular mesh."),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "usa_hcurl":       lambda r: ("SetAllCreateFunctionsHCurl" in r["resposta"]
+                                          or "TPZCompElHCurl" in r["resposta"]),
+            "compilou":        _compilou,
+        },
+    },
+    {
+        "nome": "sondagem_bc_variavel",
+        "receita": False,
+        "pergunta": ("Write a snippet that imposes a non-constant Dirichlet boundary condition "
+                     "u = x*y on the boundary of a TPZMatPoisson problem."),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "usa_forcing_bc":  lambda r: "SetForcingFunctionBC" in r["resposta"],
+        },
+    },
+    {
+        "nome": "sondagem_pt_poisson_1d",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Como resolvo um problema de Poisson 1D no intervalo [0,1] com NeoPZ? "
+                     "Mostre o código completo."),
+        "checks": {
+            "validacao_limpa":    lambda r: r["valido"],
+            "sem_create_grid_1d": lambda r: "CreateGeoMeshOnGrid" not in remover_comentarios(r["resposta"]),
+            "compilou":           _compilou,
+        },
+    },
+    {
+        "nome": "sondagem_classe_inexistente",
+        "receita": False,
+        "pergunta": "How do I use NeoPZ's TPZNavierStokes material to simulate lid-driven cavity flow?",
+        "checks": {
+            "validacao_limpa":            lambda r: r["valido"],
+            "nao_usa_classe_inexistente": lambda r: ("new TPZNavierStokes" not in r["resposta"]
+                                                     and "TPZNavierStokes.h" not in r["resposta"]),
+        },
+    },
+    {
+        "nome": "sondagem_p_refinamento",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Write a complete NeoPZ program that solves 2D Poisson and then increases "
+                     "the polynomial order of all elements from 1 to 2 (p-refinement), solving again."),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "compilou":        _compilou,
+        },
+    },
+    {
+        "nome": "sondagem_condensa_threads",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Write complete code that solves 2D Poisson with order 3 elements, using "
+                     "static condensation of the internal degrees of freedom and 8 threads for assembly."),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "cita_api_real":   lambda r: any(a in r["resposta"] for a in _API_CONDENSACAO),
+            "compilou":        _compilou,
+        },
+    },
+    {
+        "nome": "sondagem_refino_local",
+        "programa": True,
+        "receita": False,
+        "pergunta": ("Write code that refines only the geometric elements touching the point "
+                     "(0,0) of a 2D quadrilateral mesh created with TPZGeoMeshTools, twice."),
+        "checks": {
+            "validacao_limpa": lambda r: r["valido"],
+            "usa_divide":      lambda r: "Divide(" in r["resposta"],
+            "compilou":        _compilou,
+        },
+    },
+]
+
 
 def _argumentos():
     parser = argparse.ArgumentParser(description="Benchmark de regressão do assistente NeoPZ")
     parser.add_argument("--agente", action="store_true",
                         help="roda o modo agente (tool use) em vez do pipeline RAG")
-    parser.add_argument("--grupo", choices=("com_receita", "sem_receita"),
-                        help="só os casos com (ou sem) receita equivalente em wiki/flows/")
+    parser.add_argument("--grupo", choices=("com_receita", "sem_receita", "sondagem"),
+                        help="com_receita/sem_receita do benchmark padrao, ou sondagem (generalizacao)")
     parser.add_argument("--casos", help="nomes dos casos separados por vírgula")
     parser.add_argument("--executar", action="store_true",
                         help="executa os programas completos (EXECUTAR_CODIGO=1) e "
                              "acrescenta o check 'executou'")
     args = parser.parse_args()
 
-    casos = CASOS
-    if args.grupo:
-        casos = [c for c in casos if c["receita"] == (args.grupo == "com_receita")]
+    todos_casos = CASOS + CASOS_SONDAGEM
+    if args.grupo == "sondagem":
+        casos = CASOS_SONDAGEM
+    elif args.grupo:
+        casos = [c for c in CASOS if c["receita"] == (args.grupo == "com_receita")]
+    else:
+        casos = CASOS
     if args.casos:
         pedidos = [n.strip() for n in args.casos.split(",") if n.strip()]
-        desconhecidos = set(pedidos) - {c["nome"] for c in CASOS}
+        base_busca = todos_casos if not args.grupo else casos
+        desconhecidos = set(pedidos) - {c["nome"] for c in base_busca}
         if desconhecidos:
             parser.error(f"casos desconhecidos: {', '.join(sorted(desconhecidos))}")
-        casos = [c for c in casos if c["nome"] in pedidos]
+        casos = [c for c in base_busca if c["nome"] in pedidos]
     return args, casos
 
 
