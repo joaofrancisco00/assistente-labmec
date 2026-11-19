@@ -100,6 +100,7 @@ def _carregar_documentos() -> list:
                 metadata={
                     "source":         str(path),
                     "tipo":           _tipo(path),
+                    "prioridade":     _prioridade(path),
                     "titulo":         path.stem.replace("-", " ").replace("_", " "),
                     "classes_usadas": _classes(texto),
                 }

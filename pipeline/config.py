@@ -117,6 +117,17 @@ MAPA_INTENCAO_CLASSE = {
     r"adds?\b.*\bnodes?\b|create.*node|manual.*mesh|mesh.*manual": [
         "TPZGeoMesh", "TPZGeoNode", "TPZManVector",
     ],
+    r"poisson|laplac": ["TPZMatPoisson", "TPZGeoMeshTools"],
+    r"h\(?curl\)?|curl": ["TPZHCurlApproxCreator", "TPZCompMesh"],
+    r"l2.*error|exact.*sol|evaluate.*error|postprocesserror|erro.*l2|solu[çc][ãa]o.*exata": [
+        "TPZLinearAnalysis", "TPZMatErrorSingleSpace", "TPZMatPoisson",
+    ],
+    r"p[- ]?refin|polynomial.*order|ordem.*polinomial|setdefaultorder|prefine": [
+        "TPZInterpolationSpace", "TPZCompEl", "TPZCompMesh",
+    ],
+    r"dirichlet|robin|boundary.*condition|condi[çc][ãa]o.*contorno|forcingfunctionbc": [
+        "TPZBndCondT", "TPZBndCond",
+    ],
 }
 
 HEADERS_SISTEMA = {"math.h", "stdio.h", "stdlib.h", "string.h", "assert.h",

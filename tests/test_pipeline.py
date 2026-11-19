@@ -439,6 +439,17 @@ class TestReservaDeVagasNaWiki(unittest.TestCase):
                       pipeline._reservar_vagas_conceitos(pool, k=2, reservadas=0)]
         self.assertEqual(escolhidos, ["a", "b"])
 
+    def test_indexer_wiki_preenche_metadado_prioridade(self):
+        import indexer_wiki
+        self.assertEqual(
+            indexer_wiki._prioridade(Path("wiki_neopz/wiki/flows/poisson2d-complete-recipe.md")),
+            "alta",
+        )
+        docs = indexer_wiki._carregar_documentos()
+        self.assertTrue(docs)
+        self.assertTrue(all("prioridade" in d.metadata for d in docs))
+        self.assertTrue(any(d.metadata.get("prioridade") == "alta" for d in docs))
+
 
 class TestPerguntaExplicativa(unittest.TestCase):
     def test_explicativas(self):
@@ -1224,6 +1235,26 @@ class TestIntencoesNovasEPodaExemplos(unittest.TestCase):
         self.assertIn(
             "TPZGeoMesh",
             pipeline.retrieval._classes_por_intencao("Write a snippet that adds four nodes"),
+        )
+        self.assertIn(
+            "TPZMatPoisson",
+            pipeline.retrieval._classes_por_intencao("Solve a Poisson problem"),
+        )
+        self.assertIn(
+            "TPZHCurlApproxCreator",
+            pipeline.retrieval._classes_por_intencao("Create an H(curl) space"),
+        )
+        self.assertIn(
+            "TPZLinearAnalysis",
+            pipeline.retrieval._classes_por_intencao("Compute the L2 error with exact solution"),
+        )
+        self.assertIn(
+            "TPZInterpolationSpace",
+            pipeline.retrieval._classes_por_intencao("Apply p-refinement to the mesh"),
+        )
+        self.assertIn(
+            "TPZBndCondT",
+            pipeline.retrieval._classes_por_intencao("Set a Dirichlet boundary condition"),
         )
 
     def test_poda_exemplos_quando_receita_forte_presente(self):
