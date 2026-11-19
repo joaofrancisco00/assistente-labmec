@@ -149,6 +149,46 @@ class TestRespostaFinalDoAgente(unittest.TestCase):
         self.assertIsInstance(r["resposta"], str)
         self.assertTrue(r["valido"])
 
+    def test_prompt_do_agente_inclui_system_base(self):
+        capturado = {}
+
+        def _fake_create(llm, tools, prompt):
+            capturado["prompt"] = prompt
+            return None
+
+        executor = type("Executor", (_ExecutorFalso,), {"saida": CODIGO_CORRETO})
+        ctx = _ctx()
+        ctx.system_base = "REGRA_CANONICA_NEOPZ"
+        with patch.object(agent, "_recuperar_contexto", return_value=([], [], [], {"wiki/x.md"})), \
+             patch.object(agent, "create_tool_calling_agent", side_effect=_fake_create), \
+             patch.object(agent, "AgentExecutor", executor), \
+             patch.object(pipeline, "_compilar_codigo", return_value=COMPILOU), \
+             redirect_stdout(io.StringIO()):
+            agent.gerar_codigo_agente("2D elasticity", ctx)
+        msgs = capturado["prompt"].format_messages(
+            input="2D elasticity", chat_history=[], agent_scratchpad=[])
+        self.assertIn("REGRA_CANONICA_NEOPZ", msgs[0].content)
+
+    def test_recupera_codigo_validado_quando_agente_omite_bloco_cpp(self):
+        class _ExecutorChamaTool:
+            def __init__(self, **kw):
+                self.tools = kw["tools"]
+
+            def invoke(self, entrada):
+                comp_tool = next(t for t in self.tools if t.name == "test_compilation")
+                comp_tool.invoke({"cpp_code": CODIGO_CORRETO})
+                return {"output": "The code compiled successfully!"}
+
+        with patch.object(agent, "_recuperar_contexto", return_value=([], [], [], {"wiki/x.md"})), \
+             patch.object(agent, "create_tool_calling_agent", return_value=None), \
+             patch.object(agent, "AgentExecutor", _ExecutorChamaTool), \
+             patch.object(pipeline, "_compilar_codigo", return_value=COMPILOU), \
+             redirect_stdout(io.StringIO()):
+            r = agent.gerar_codigo_agente("2D elasticity", _ctx())
+        self.assertTrue(r["valido"])
+        self.assertIn("TPZElasticity2D", r["resposta"])
+        self.assertEqual(r["compilacao"]["status"], "ok")
+
 
 class TestModeloLocalUsaORag(unittest.TestCase):
     def test_ollama_cai_para_o_pipeline_rag(self):

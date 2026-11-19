@@ -6,6 +6,7 @@ from .config import OLLAMA_MODEL
 from .context import PipelineContext
 from .prompt import _formatar_contexto
 from .retrieval import _recuperar_contexto
+from .validation import _resposta_contem_codigo
 
 def _resultado_sem_verificacao(resposta: str, fontes: set, llm=None) -> dict:
     v = {"resposta": resposta, "alucinacoes": [], "erros_aridade": [], "erros_semanticos": [],
@@ -37,8 +38,9 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
     if hasattr(llm, "max_retries"):
         llm = llm.model_copy(update={"max_retries": 4})
     
+    estado_agente = {}
     try:
-        tools = obter_todas_ferramentas(ctx, pergunta)
+        tools = obter_todas_ferramentas(ctx, pergunta, estado=estado_agente)
         # Validação simples se o modelo suporta
         llm.bind_tools(tools)
     except Exception:
@@ -54,6 +56,7 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
 
     prompt = ChatPromptTemplate.from_messages([
         ("system",
+         "{system_base}\n\n"
          "You are a Senior Software Engineer specialized in C++ and in the 'NeoPZ' Finite Element library.\n"
          "Your mission is to help the user by generating clean, error-free C++ code that compiles perfectly.\n"
          "GOLDEN RULES:\n"
@@ -70,7 +73,7 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
     ])
-    prompt = prompt.partial(contexto=contexto)
+    prompt = prompt.partial(contexto=contexto, system_base=ctx.system_base or "")
 
     agent = create_tool_calling_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(
@@ -103,6 +106,10 @@ def gerar_codigo_agente(pergunta: str, ctx: PipelineContext, historico: list = N
         if isinstance(resposta_final, list):
             resposta_final = "".join(p.get("text", "") if isinstance(p, dict) else str(p)
                                      for p in resposta_final)
+        if not _resposta_contem_codigo(resposta_final):
+            codigo_recuperado = estado_agente.get("ultimo_valido") or estado_agente.get("ultimo_testado")
+            if codigo_recuperado:
+                resposta_final = f"{resposta_final.rstrip()}\n\n{codigo_recuperado}".strip()
     except Exception as e:
         houve_erro = True
         resposta_final = f"⚠️ Internal error in the agent reasoning: {e}"
